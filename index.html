@@ -79,6 +79,12 @@
       gap: 1.5rem;
     }
 
+    .app-layout {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
     .visual-panels {
       display: grid;
       grid-template-columns: 1fr;
@@ -92,9 +98,32 @@
 
     .controls-row {
       display: flex;
-      flex-wrap: wrap;
-      gap: 1rem 1.5rem;
-      align-items: flex-end;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: stretch;
+    }
+
+    .panel-shell {
+      background: none;
+      border-radius: 0;
+      padding: 0;
+      box-shadow: none;
+      border: none;
+    }
+
+    .controls-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .controls-panel .controls-row .control-block {
+      flex: 0 0 auto;
+      min-width: 0;
+    }
+
+    .controls-panel select {
+      width: 100%;
     }
 
     .control-block {
@@ -113,6 +142,18 @@
       text-transform: uppercase;
       letter-spacing: 0.06em;
       color: #ffecd9;
+    }
+
+    .panel-header {
+      margin-bottom: 0.1rem;
+    }
+
+    .panel-title {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #ffdac1;
+      font-weight: 600;
     }
 
     .adjustments-block {
@@ -347,8 +388,22 @@
     }
 
     @media (min-width: 1100px) {
+      .app-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+        align-items: flex-start;
+        gap: 1.5rem;
+      }
+
       .visual-panels {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .controls-panel {
+        position: sticky;
+        top: 1.5rem;
+        max-height: calc(100vh - 3rem);
+        overflow-y: auto;
       }
     }
 
@@ -374,79 +429,86 @@
   <input type="file" accept="image/*" id="fileInput" hidden>
 
   <main>
-    <div class="visual-panels">
-      <section class="preview-section">
-        <figure>
-          <figcaption>Image preview</figcaption>
-          <canvas id="imageCanvas" tabindex="0"></canvas>
-        </figure>
-        <div class="status-row">
-          <button type="button" class="reset-button hidden" id="resetButton">Reset</button>
-        </div>
-      </section>
+    <div class="app-layout">
+      <div class="visual-panels">
+        <section class="preview-section panel-shell">
+          <figure>
+            <figcaption>Image preview</figcaption>
+            <canvas id="imageCanvas" tabindex="0"></canvas>
+          </figure>
+          <div class="status-row">
+            <button type="button" class="reset-button hidden" id="resetButton">Reset</button>
+          </div>
+        </section>
 
-      <section class="cube-row hidden" id="cubeSection">
-        <figure>
-          <figcaption>Color cube</figcaption>
-          <canvas id="spaceCanvas"></canvas>
-        </figure>
+        <section class="cube-row panel-shell hidden" id="cubeSection">
+          <figure>
+            <figcaption>Color cube</figcaption>
+            <canvas id="spaceCanvas"></canvas>
+          </figure>
+        </section>
+      </div>
+
+      <section class="controls-panel panel-shell hidden" id="optionsSection">
+        <header class="panel-header">
+          <span class="panel-title">Options</span>
+        </header>
+        <div class="controls-row">
+          <label class="control-block">
+            Color space
+            <select id="spaceSelect">
+              <option value="rgb">RGB</option>
+              <option value="lab">Lab</option>
+              <option value="lch">LCh</option>
+            </select>
+          </label>
+          <label class="control-block">
+            Color samples
+            <div class="range-input">
+              <input type="range" id="sampleSlider" min="200" max="10000" step="100" value="2000">
+              <output id="sampleCountLabel" for="sampleSlider">2,000</output>
+            </div>
+          </label>
+          <label class="control-block">
+            Similar color tolerance
+            <div class="range-input">
+              <input type="range" id="toleranceSlider" min="2" max="50" step="1" value="2">
+              <output id="toleranceLabel" for="toleranceSlider">2 ΔE</output>
+            </div>
+          </label>
+        </div>
+
+        <div class="control-block adjustments-block">
+          <span class="control-title">Image adjustments</span>
+          <div class="adjustments-group">
+            <label class="sub-control">
+              <span class="sub-control-title">Brightness</span>
+              <div class="range-input">
+                <input type="range" id="brightnessSlider" min="-100" max="100" step="1" value="0">
+                <output id="brightnessLabel" for="brightnessSlider">0</output>
+              </div>
+            </label>
+            <label class="sub-control">
+              <span class="sub-control-title">Contrast</span>
+              <div class="range-input">
+                <input type="range" id="contrastSlider" min="-100" max="100" step="1" value="0">
+                <output id="contrastLabel" for="contrastSlider">0</output>
+              </div>
+            </label>
+            <label class="sub-control">
+              <span class="sub-control-title">Saturation</span>
+              <div class="range-input">
+                <input type="range" id="saturationSlider" min="0" max="200" step="1" value="100">
+                <output id="saturationLabel" for="saturationSlider">100%</output>
+              </div>
+            </label>
+          </div>
+          <div class="adjustments-actions">
+            <button type="button" class="ghost-button" id="resetAdjustmentsButton">Reset adjustments</button>
+          </div>
+        </div>
       </section>
     </div>
-
-    <section class="controls-row hidden" id="optionsSection">
-      <label class="control-block">
-        Color space
-        <select id="spaceSelect">
-          <option value="rgb">RGB</option>
-          <option value="lab">Lab</option>
-          <option value="lch">LCh</option>
-        </select>
-      </label>
-      <label class="control-block">
-        Color samples
-        <div class="range-input">
-          <input type="range" id="sampleSlider" min="200" max="10000" step="100" value="2000">
-          <output id="sampleCountLabel" for="sampleSlider">2,000</output>
-        </div>
-      </label>
-      <label class="control-block">
-        Similar color tolerance
-        <div class="range-input">
-          <input type="range" id="toleranceSlider" min="2" max="50" step="1" value="2">
-          <output id="toleranceLabel" for="toleranceSlider">2 ΔE</output>
-        </div>
-      </label>
-      <div class="control-block adjustments-block">
-        <span class="control-title">Image adjustments</span>
-        <div class="adjustments-group">
-          <label class="sub-control">
-            <span class="sub-control-title">Brightness</span>
-            <div class="range-input">
-              <input type="range" id="brightnessSlider" min="-100" max="100" step="1" value="0">
-              <output id="brightnessLabel" for="brightnessSlider">0</output>
-            </div>
-          </label>
-          <label class="sub-control">
-            <span class="sub-control-title">Contrast</span>
-            <div class="range-input">
-              <input type="range" id="contrastSlider" min="-100" max="100" step="1" value="0">
-              <output id="contrastLabel" for="contrastSlider">0</output>
-            </div>
-          </label>
-          <label class="sub-control">
-            <span class="sub-control-title">Saturation</span>
-            <div class="range-input">
-              <input type="range" id="saturationSlider" min="0" max="200" step="1" value="100">
-              <output id="saturationLabel" for="saturationSlider">100%</output>
-            </div>
-          </label>
-        </div>
-        <div class="adjustments-actions">
-          <button type="button" class="ghost-button" id="resetAdjustmentsButton">Reset adjustments</button>
-        </div>
-      </div>
-    </section>
-
   </main>
 
   <footer>
@@ -649,7 +711,12 @@
         drawPlaceholderImage();
         return;
       }
-      const { width, height } = fitContain(loadedImage.width, loadedImage.height, imageCanvas.width, imageCanvas.height);
+      const { width, height } = fitCover(
+        loadedImage.width,
+        loadedImage.height,
+        imageCanvas.width,
+        imageCanvas.height
+      );
       const offsetX = (imageCanvas.width - width) / 2;
       const offsetY = (imageCanvas.height - height) / 2;
       imageCtx.drawImage(loadedImage, offsetX, offsetY, width, height);
@@ -754,8 +821,8 @@
       imageCtx.fillText('Drop a photo here or pick one above', imageCanvas.width / 2, imageCanvas.height / 2);
     }
 
-    function fitContain(srcWidth, srcHeight, maxWidth, maxHeight) {
-      const scale = Math.min(maxWidth / srcWidth, maxHeight / srcHeight);
+    function fitCover(srcWidth, srcHeight, maxWidth, maxHeight) {
+      const scale = Math.max(maxWidth / srcWidth, maxHeight / srcHeight);
       return {
         width: srcWidth * scale,
         height: srcHeight * scale
