@@ -32,9 +32,7 @@
     }
 
     header {
-      max-width: 960px;
       width: 100%;
-      margin: 0 auto;
     }
 
     header h1 {
@@ -56,7 +54,6 @@
     }
 
     footer {
-      max-width: 960px;
       width: 100%;
       margin: auto;
       text-align: center;
@@ -75,12 +72,22 @@
     }
 
     main {
-      max-width: 960px;
       width: 100%;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
       gap: 1.5rem;
+    }
+
+    .visual-panels {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    .visual-panels > * {
+      min-width: 0;
     }
 
     .controls-row {
@@ -214,7 +221,7 @@
     }
 
     .cube-row {
-      margin-top: 0.75rem;
+      margin: 0;
     }
 
     .cube-row figure {
@@ -282,6 +289,12 @@
       transform: translateY(-2px);
     }
 
+    @media (min-width: 1100px) {
+      .visual-panels {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
     @media (max-width: 768px) {
       body {
         padding: 1.75rem 1rem 2rem;
@@ -304,22 +317,24 @@
   <input type="file" accept="image/*" id="fileInput" hidden>
 
   <main>
-    <section class="preview-section">
-      <figure>
-        <figcaption>Image preview</figcaption>
-        <canvas id="imageCanvas" tabindex="0"></canvas>
-      </figure>
-      <div class="status-row">
-        <button type="button" class="reset-button hidden" id="resetButton">Reset</button>
-      </div>
-    </section>
+    <div class="visual-panels">
+      <section class="preview-section">
+        <figure>
+          <figcaption>Image preview</figcaption>
+          <canvas id="imageCanvas" tabindex="0"></canvas>
+        </figure>
+        <div class="status-row">
+          <button type="button" class="reset-button hidden" id="resetButton">Reset</button>
+        </div>
+      </section>
 
-    <section class="cube-row hidden" id="cubeSection">
-      <figure>
-        <figcaption>Color cube</figcaption>
-        <canvas id="spaceCanvas"></canvas>
-      </figure>
-    </section>
+      <section class="cube-row hidden" id="cubeSection">
+        <figure>
+          <figcaption>Color cube</figcaption>
+          <canvas id="spaceCanvas"></canvas>
+        </figure>
+      </section>
+    </div>
 
     <section class="controls-row hidden" id="optionsSection">
       <label class="control-block">
@@ -337,6 +352,13 @@
           <output id="sampleCountLabel" for="sampleSlider">2,000</output>
         </div>
       </label>
+      <label class="control-block">
+        Similar color tolerance
+        <div class="range-input">
+          <input type="range" id="toleranceSlider" min="2" max="50" step="1" value="2">
+          <output id="toleranceLabel" for="toleranceSlider">2 ΔE</output>
+        </div>
+      </label>
     </section>
 
   </main>
@@ -350,6 +372,8 @@
     const spaceSelect = document.getElementById('spaceSelect');
     const sampleSlider = document.getElementById('sampleSlider');
     const sampleCountLabel = document.getElementById('sampleCountLabel');
+    const toleranceSlider = document.getElementById('toleranceSlider');
+    const toleranceLabel = document.getElementById('toleranceLabel');
     const imageCanvas = document.getElementById('imageCanvas');
     const resetButton = document.getElementById('resetButton');
     const spaceCanvas = document.getElementById('spaceCanvas');
@@ -393,7 +417,7 @@
     const ROTATION_EASING = 0.18;
     const ZOOM_EASING = 0.16;
     const HOVER_EASING = 0.25;
-    const HIGHLIGHT_DELTA = 12;
+    const DEFAULT_HIGHLIGHT_DELTA = 2;
     const DIM_FACTOR = 0.14;
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -416,6 +440,10 @@
     let tooltipPosition = { x: 0, y: 0 };
     let dragMoved = false;
     let sampleTarget = parseInt(sampleSlider?.value ?? '2000', 10) || 2000;
+    let highlightTolerance = parseInt(
+      toleranceSlider?.value ?? String(DEFAULT_HIGHLIGHT_DELTA),
+      10
+    ) || DEFAULT_HIGHLIGHT_DELTA;
     let hoverAmount = 0;
     let hoverAmountTarget = 0;
     let hoverSource = null;
@@ -434,6 +462,7 @@
       requestRender();
     });
     sampleSlider.addEventListener('input', handleSampleChange);
+    toleranceSlider?.addEventListener('input', handleToleranceChange);
     imageCanvas.addEventListener('click', handleImageClick);
     imageCanvas.addEventListener('keydown', handlePreviewKey);
     imageCanvas.addEventListener('mousemove', handleImageHover);
@@ -468,6 +497,7 @@
     spaceCanvas.addEventListener('touchcancel', handleTouchEnd);
 
     syncSampleLabel();
+    syncToleranceLabel();
     setColorUiVisible(false);
     initializeCanvases();
     drawPlaceholderImage();
@@ -1087,7 +1117,7 @@
       const dest = highlightImageData.data;
       const labBuffer = imageLabBuffer;
       const { L, a, b } = sample.lab;
-      const threshold = HIGHLIGHT_DELTA;
+      const threshold = highlightTolerance;
       for (let i = 0, j = 0; i < src.length; i += 4, j += 3) {
         const dL = labBuffer[j] - L;
         const da = labBuffer[j + 1] - a;
@@ -1282,6 +1312,22 @@
     function syncSampleLabel() {
       if (sampleCountLabel) {
         sampleCountLabel.textContent = sampleTarget.toLocaleString();
+      }
+    }
+
+    function handleToleranceChange() {
+      const nextValue = parseInt(toleranceSlider.value, 10);
+      if (!Number.isFinite(nextValue)) return;
+      highlightTolerance = nextValue;
+      syncToleranceLabel();
+      if (hoveredSample) {
+        applyImageHighlight(hoveredSample);
+      }
+    }
+
+    function syncToleranceLabel() {
+      if (toleranceLabel) {
+        toleranceLabel.textContent = `${highlightTolerance} ΔE`;
       }
     }
 
