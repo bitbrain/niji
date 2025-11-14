@@ -107,6 +107,45 @@
       min-width: 220px;
     }
 
+    .control-title {
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #ffecd9;
+    }
+
+    .adjustments-block {
+      gap: 0.8rem;
+    }
+
+    .adjustments-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .sub-control {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.85rem;
+      color: #ffe5c9;
+    }
+
+    .sub-control-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #ffdccc;
+    }
+
+    .adjustments-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+
     .preview-section {
       display: flex;
       flex-direction: column;
@@ -218,6 +257,24 @@
 
     .reset-button:hover {
       transform: translateY(-1px);
+    }
+
+    .ghost-button {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 0.85rem;
+      padding: 0.45rem 1.2rem;
+      background: transparent;
+      color: #ffe8d9;
+      font: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .ghost-button:hover {
+      border-color: rgba(255, 255, 255, 0.5);
+      color: #fff9f2;
     }
 
     .cube-row {
@@ -359,6 +416,35 @@
           <output id="toleranceLabel" for="toleranceSlider">2 ΔE</output>
         </div>
       </label>
+      <div class="control-block adjustments-block">
+        <span class="control-title">Image adjustments</span>
+        <div class="adjustments-group">
+          <label class="sub-control">
+            <span class="sub-control-title">Brightness</span>
+            <div class="range-input">
+              <input type="range" id="brightnessSlider" min="-100" max="100" step="1" value="0">
+              <output id="brightnessLabel" for="brightnessSlider">0</output>
+            </div>
+          </label>
+          <label class="sub-control">
+            <span class="sub-control-title">Contrast</span>
+            <div class="range-input">
+              <input type="range" id="contrastSlider" min="-100" max="100" step="1" value="0">
+              <output id="contrastLabel" for="contrastSlider">0</output>
+            </div>
+          </label>
+          <label class="sub-control">
+            <span class="sub-control-title">Saturation</span>
+            <div class="range-input">
+              <input type="range" id="saturationSlider" min="0" max="200" step="1" value="100">
+              <output id="saturationLabel" for="saturationSlider">100%</output>
+            </div>
+          </label>
+        </div>
+        <div class="adjustments-actions">
+          <button type="button" class="ghost-button" id="resetAdjustmentsButton">Reset adjustments</button>
+        </div>
+      </div>
     </section>
 
   </main>
@@ -374,6 +460,13 @@
     const sampleCountLabel = document.getElementById('sampleCountLabel');
     const toleranceSlider = document.getElementById('toleranceSlider');
     const toleranceLabel = document.getElementById('toleranceLabel');
+    const brightnessSlider = document.getElementById('brightnessSlider');
+    const brightnessLabel = document.getElementById('brightnessLabel');
+    const contrastSlider = document.getElementById('contrastSlider');
+    const contrastLabel = document.getElementById('contrastLabel');
+    const saturationSlider = document.getElementById('saturationSlider');
+    const saturationLabel = document.getElementById('saturationLabel');
+    const resetAdjustmentsButton = document.getElementById('resetAdjustmentsButton');
     const imageCanvas = document.getElementById('imageCanvas');
     const resetButton = document.getElementById('resetButton');
     const spaceCanvas = document.getElementById('spaceCanvas');
@@ -419,6 +512,11 @@
     const HOVER_EASING = 0.25;
     const DEFAULT_HIGHLIGHT_DELTA = 2;
     const DIM_FACTOR = 0.14;
+    const DEFAULT_ADJUSTMENTS = Object.freeze({
+      brightness: 0,
+      contrast: 0,
+      saturation: 100
+    });
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
     const referenceGrid = createReferenceGrid(6);
@@ -444,6 +542,7 @@
       toleranceSlider?.value ?? String(DEFAULT_HIGHLIGHT_DELTA),
       10
     ) || DEFAULT_HIGHLIGHT_DELTA;
+    let imageAdjustments = { ...DEFAULT_ADJUSTMENTS };
     let hoverAmount = 0;
     let hoverAmountTarget = 0;
     let hoverSource = null;
@@ -463,6 +562,10 @@
     });
     sampleSlider.addEventListener('input', handleSampleChange);
     toleranceSlider?.addEventListener('input', handleToleranceChange);
+    brightnessSlider?.addEventListener('input', () => handleAdjustmentChange('brightness'));
+    contrastSlider?.addEventListener('input', () => handleAdjustmentChange('contrast'));
+    saturationSlider?.addEventListener('input', () => handleAdjustmentChange('saturation'));
+    resetAdjustmentsButton?.addEventListener('click', resetAdjustments);
     imageCanvas.addEventListener('click', handleImageClick);
     imageCanvas.addEventListener('keydown', handlePreviewKey);
     imageCanvas.addEventListener('mousemove', handleImageHover);
@@ -498,6 +601,7 @@
 
     syncSampleLabel();
     syncToleranceLabel();
+    syncAdjustmentLabels();
     setColorUiVisible(false);
     initializeCanvases();
     drawPlaceholderImage();
@@ -530,10 +634,8 @@
         img.onload = () => {
           loadedImage = img;
           redrawImage();
-          samples = sampleImage(img);
-          clearHover(false);
+          resampleImage();
           setColorUiVisible(true);
-          requestRender();
         };
         img.src = reader.result;
       };
@@ -552,10 +654,72 @@
       const offsetY = (imageCanvas.height - height) / 2;
       imageCtx.drawImage(loadedImage, offsetX, offsetY, width, height);
       imageDrawRegion = { x: offsetX, y: offsetY, width, height };
+      applyAdjustmentsToRegion(offsetX, offsetY, width, height);
       cacheImageData();
       if (hoveredSample) {
         applyImageHighlight(hoveredSample);
       }
+    }
+
+    function applyAdjustmentsToRegion(x, y, width, height) {
+      if (!loadedImage || width <= 0 || height <= 0) return;
+      const adjustmentContext = getAdjustmentContext();
+      if (adjustmentContext.isIdentity) return;
+      const regionX = Math.max(0, Math.floor(x));
+      const regionY = Math.max(0, Math.floor(y));
+      const regionWidth = Math.min(imageCanvas.width - regionX, Math.ceil(width));
+      const regionHeight = Math.min(imageCanvas.height - regionY, Math.ceil(height));
+      if (regionWidth <= 0 || regionHeight <= 0) return;
+      const imageData = imageCtx.getImageData(regionX, regionY, regionWidth, regionHeight);
+      applyAdjustmentsToImageData(imageData, adjustmentContext);
+      imageCtx.putImageData(imageData, regionX, regionY);
+    }
+
+    function applyAdjustmentsToImageData(imageData, adjustmentContext = getAdjustmentContext()) {
+      if (adjustmentContext.isIdentity) return imageData;
+      const { data } = imageData;
+      for (let i = 0; i < data.length; i += 4) {
+        const [r, g, b] = applyAdjustmentsToChannels(
+          data[i],
+          data[i + 1],
+          data[i + 2],
+          adjustmentContext
+        );
+        data[i] = r;
+        data[i + 1] = g;
+        data[i + 2] = b;
+      }
+      return imageData;
+    }
+
+    function applyAdjustmentsToChannels(r, g, b, adjustmentContext = getAdjustmentContext()) {
+      if (adjustmentContext.isIdentity) {
+        return [r, g, b];
+      }
+      const { brightnessOffset, contrastFactor, saturationFactor } = adjustmentContext;
+      let nr = (r - 128) * contrastFactor + 128 + brightnessOffset;
+      let ng = (g - 128) * contrastFactor + 128 + brightnessOffset;
+      let nb = (b - 128) * contrastFactor + 128 + brightnessOffset;
+      const gray = 0.299 * nr + 0.587 * ng + 0.114 * nb;
+      nr = gray + (nr - gray) * saturationFactor;
+      ng = gray + (ng - gray) * saturationFactor;
+      nb = gray + (nb - gray) * saturationFactor;
+      return [
+        clamp(Math.round(nr), 0, 255),
+        clamp(Math.round(ng), 0, 255),
+        clamp(Math.round(nb), 0, 255)
+      ];
+    }
+
+    function getAdjustmentContext() {
+      const brightness = clamp(imageAdjustments.brightness ?? 0, -100, 100);
+      const contrast = clamp(imageAdjustments.contrast ?? 0, -100, 100);
+      const saturation = clamp(imageAdjustments.saturation ?? 100, 0, 200);
+      const brightnessOffset = (brightness / 100) * 255;
+      const contrastFactor = (contrast + 100) / 100;
+      const saturationFactor = saturation / 100;
+      const isIdentity = brightness === 0 && contrast === 0 && saturation === 100;
+      return { brightnessOffset, contrastFactor, saturationFactor, isIdentity };
     }
 
     function drawPlaceholderImage() {
@@ -645,7 +809,9 @@
       sampleCanvas.height = h;
       sampleCtx.drawImage(image, 0, 0, w, h);
 
-      const data = sampleCtx.getImageData(0, 0, w, h).data;
+      const sampledImageData = sampleCtx.getImageData(0, 0, w, h);
+      const data = sampledImageData.data;
+      const adjustmentContext = getAdjustmentContext();
       const targetSamples = Math.max(50, sampleTarget);
       const stride = Math.max(1, Math.round(Math.sqrt((w * h) / targetSamples)));
       const collected = [];
@@ -656,9 +822,10 @@
           const r = data[idx];
           const g = data[idx + 1];
           const b = data[idx + 2];
-          const lab = rgbToLab(r, g, b);
+          const [adjR, adjG, adjB] = applyAdjustmentsToChannels(r, g, b, adjustmentContext);
+          const lab = rgbToLab(adjR, adjG, adjB);
           const lch = labToLch(lab.L, lab.a, lab.b);
-          collected.push({ rgb: [r, g, b], lab, lch });
+          collected.push({ rgb: [adjR, adjG, adjB], lab, lch });
         }
       }
 
@@ -1302,17 +1469,20 @@
       if (!Number.isFinite(nextValue)) return;
       sampleTarget = nextValue;
       syncSampleLabel();
-      if (loadedImage) {
-        samples = sampleImage(loadedImage);
-        clearHover(false);
-        requestRender();
-      }
+      resampleImage();
     }
 
     function syncSampleLabel() {
       if (sampleCountLabel) {
         sampleCountLabel.textContent = sampleTarget.toLocaleString();
       }
+    }
+
+    function resampleImage() {
+      if (!loadedImage) return;
+      samples = sampleImage(loadedImage);
+      clearHover(false);
+      requestRender();
     }
 
     function handleToleranceChange() {
@@ -1329,6 +1499,60 @@
       if (toleranceLabel) {
         toleranceLabel.textContent = `${highlightTolerance} ΔE`;
       }
+    }
+
+    function handleAdjustmentChange(type) {
+      if (type === 'brightness' && brightnessSlider) {
+        const value = parseInt(brightnessSlider.value, 10);
+        if (Number.isFinite(value)) {
+          imageAdjustments.brightness = value;
+        }
+      } else if (type === 'contrast' && contrastSlider) {
+        const value = parseInt(contrastSlider.value, 10);
+        if (Number.isFinite(value)) {
+          imageAdjustments.contrast = value;
+        }
+      } else if (type === 'saturation' && saturationSlider) {
+        const value = parseInt(saturationSlider.value, 10);
+        if (Number.isFinite(value)) {
+          imageAdjustments.saturation = value;
+        }
+      }
+      syncAdjustmentLabels();
+      if (loadedImage) {
+        redrawImage();
+        resampleImage();
+      }
+    }
+
+    function resetAdjustments() {
+      imageAdjustments = { ...DEFAULT_ADJUSTMENTS };
+      if (brightnessSlider) brightnessSlider.value = String(DEFAULT_ADJUSTMENTS.brightness);
+      if (contrastSlider) contrastSlider.value = String(DEFAULT_ADJUSTMENTS.contrast);
+      if (saturationSlider) saturationSlider.value = String(DEFAULT_ADJUSTMENTS.saturation);
+      syncAdjustmentLabels();
+      if (loadedImage) {
+        redrawImage();
+        resampleImage();
+      }
+    }
+
+    function syncAdjustmentLabels() {
+      if (brightnessLabel) {
+        brightnessLabel.textContent = formatSigned(imageAdjustments.brightness);
+      }
+      if (contrastLabel) {
+        contrastLabel.textContent = formatSigned(imageAdjustments.contrast);
+      }
+      if (saturationLabel) {
+        saturationLabel.textContent = `${imageAdjustments.saturation}%`;
+      }
+    }
+
+    function formatSigned(value) {
+      if (value > 0) return `+${value}`;
+      if (value < 0) return `${value}`;
+      return '0';
     }
 
     function rgbToLab(r, g, b) {
