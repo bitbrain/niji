@@ -472,6 +472,22 @@
       padding-right: 2.65rem;
       position: relative;
       box-shadow: none;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+    }
+
+    .space-mod-item.dragging {
+      cursor: grabbing;
+      opacity: 0.9;
+      transform: scale(1.02);
+      box-shadow: 0 10px 25px rgba(15, 15, 15, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      z-index: 2;
+    }
+
+    .space-mod-list.drag-active .space-mod-item:not(.dragging) {
+      opacity: 0.75;
     }
 
     .space-mod-name {
@@ -535,6 +551,50 @@
     .space-mod-remove:focus-visible {
       opacity: 1;
       transform: scale(1);
+    }
+
+    .space-mod-trash {
+      margin-top: 0.85rem;
+      border-radius: 0.9rem;
+      border: 1px dashed rgba(255, 255, 255, 0.2);
+      padding: 0.65rem 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      color: rgba(255, 240, 228, 0.75);
+      background: rgba(255, 255, 255, 0.02);
+      transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, opacity 0.2s ease,
+        transform 0.2s ease;
+    }
+
+    .space-mod-trash-text {
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .space-mod-trash.is-hidden {
+      display: none;
+    }
+
+    .space-mod-trash svg {
+      width: 1.25rem;
+      height: 1.25rem;
+      fill: currentColor;
+      opacity: 0.85;
+      flex-shrink: 0;
+    }
+
+    .space-mod-trash.is-drag-target {
+      border-color: rgba(248, 113, 113, 0.6);
+      background: rgba(248, 113, 113, 0.08);
+      color: #ffe7e1;
+    }
+
+    .space-mod-trash.is-hovered {
+      border-color: #f87171;
+      background: rgba(248, 113, 113, 0.2);
+      color: #fff;
+      transform: translateY(-1px);
     }
 
     #clearSpaceAdjustmentsButton:disabled {
@@ -661,6 +721,17 @@
           <ul class="space-mod-list" id="spaceModificationsList" aria-live="polite">
             <li class="space-mod-empty">No color space modifications yet.</li>
           </ul>
+          <div class="space-mod-trash is-hidden" id="spaceModTrash" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M9 3.5h6l.5 2.5H21v2H3v-2h5.5l.5-2.5zm1.5 4.5h3l-.6 11h-1.8l-.6-11z"
+                fill="currentColor"
+                fill-rule="evenodd"
+                clip-rule="evenodd"
+              ></path>
+            </svg>
+            <div class="space-mod-trash-text">Drag adjustments here to delete</div>
+          </div>
           <div class="adjustments-actions">
             <button
               type="button"
@@ -730,6 +801,7 @@
     const spaceAdjustmentsContainer = document.getElementById('spaceAdjustmentsContainer');
     const resetSpaceAdjustmentsButton = document.getElementById('resetSpaceAdjustmentsButton');
     const spaceModificationsList = document.getElementById('spaceModificationsList');
+    const spaceModTrash = document.getElementById('spaceModTrash');
     const clearSpaceAdjustmentsButton = document.getElementById('clearSpaceAdjustmentsButton');
     const imageCanvas = document.getElementById('imageCanvas');
     const resetButton = document.getElementById('resetButton');
@@ -1212,7 +1284,7 @@
     };
     const HOVER_PICK_RADIUS = 9;
     const BASE_POINT_RADIUS = 3;
-    const HOVER_RADIUS_DELTA = 4;
+    const HOVER_RADIUS_DELTA = 12;
     const ROTATION_EASING = 0.18;
     const ZOOM_EASING = 0.16;
     const HOVER_EASING = 0.25;
@@ -1230,6 +1302,7 @@
     const ADJUSTMENT_STORAGE_KEY = 'niji-adjustments-v1';
     const IMAGE_STORAGE_KEY = 'niji-image-v1';
     const PERSIST_DEBOUNCE_MS = 150;
+    const SPACE_MOD_DRAG_THRESHOLD = 6;
     let persistAdjustmentsHandle = null;
 
     let loadedImage = null;
@@ -1265,6 +1338,8 @@
     let highlightActive = false;
     let lastHighlightSample = null;
     let imageDrawRegion = { x: 0, y: 0, width: 0, height: 0 };
+    let spaceAdjustmentOrder = [];
+    let spaceModDragState = null;
 
     restoreAdjustmentState();
 
@@ -1291,6 +1366,7 @@
     imageCanvas.addEventListener('mousemove', handleImageHover);
     imageCanvas.addEventListener('mouseleave', handleImageLeave);
     resetButton.addEventListener('click', resetImage);
+    initializeSpaceModificationDragAndDrop();
 
     window.addEventListener('resize', () => {
       const changedImage = resizeCanvas(imageCanvas);
@@ -1526,32 +1602,34 @@
 
     function collectActiveSpaceAdjustmentEntries() {
       const preferredMode = spaceSelect?.value ?? null;
-      const modes = new Set(Object.keys(spaceAdjustmentState));
+      const pendingModes = new Set(Object.keys(spaceAdjustmentState));
       if (preferredMode) {
-        modes.add(preferredMode);
+        pendingModes.add(preferredMode);
       }
+      const evaluationOrder = [];
+      spaceAdjustmentOrder.forEach((mode) => {
+        if (pendingModes.has(mode)) {
+          evaluationOrder.push(mode);
+          pendingModes.delete(mode);
+        }
+      });
+      pendingModes.forEach((mode) => evaluationOrder.push(mode));
       const entries = [];
-      modes.forEach((mode) => {
+      evaluationOrder.forEach((mode) => {
         const descriptor = colorSpaceAdjustmentDefinitions[mode];
-        if (!descriptor) return;
+        if (!descriptor) {
+          removeModeFromOrder(mode);
+          return;
+        }
         const { deltas, hasAdjustments } = getSpaceAdjustmentDeltas(mode);
         if (hasAdjustments) {
           entries.push({ mode, descriptor, deltas });
-        }
-      });
-      if (!preferredMode) {
-        return entries;
-      }
-      const leading = [];
-      const trailing = [];
-      entries.forEach((entry) => {
-        if (entry.mode === preferredMode) {
-          trailing.push(entry);
+          ensureModeInOrder(mode);
         } else {
-          leading.push(entry);
+          removeModeFromOrder(mode);
         }
       });
-      return [...leading, ...trailing];
+      return entries;
     }
 
     function drawPlaceholderImage() {
@@ -1780,7 +1858,10 @@
       const sorted = projected.slice().sort((a, b) => a.depth - b.depth);
 
       spaceCtx.save();
-      sorted.forEach(({ x, y, rgb, isHovered }) => {
+      const nonHovered = sorted.filter((e) => !e.isHovered);
+      const hoveredOnly = sorted.filter((e) => e.isHovered);
+
+      const drawEntry = ({ x, y, rgb, isHovered }) => {
         const radius = BASE_POINT_RADIUS + (isHovered ? hoverAmount * HOVER_RADIUS_DELTA : 0);
         spaceCtx.beginPath();
         spaceCtx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
@@ -1795,7 +1876,10 @@
           spaceCtx.arc(x, y, radius + 1.5, 0, Math.PI * 2);
           spaceCtx.stroke();
         }
-      });
+      };
+
+      nonHovered.forEach(drawEntry);
+      hoveredOnly.forEach(drawEntry);
       spaceCtx.restore();
     }
 
@@ -2429,7 +2513,12 @@
       if (!storedPayload || typeof storedPayload !== 'object') {
         return;
       }
-      const { imageAdjustments: storedImage, spaceAdjustments: storedSpaces, selectedSpace } = storedPayload;
+      const {
+        imageAdjustments: storedImage,
+        spaceAdjustments: storedSpaces,
+        selectedSpace,
+        spaceOrder
+      } = storedPayload;
       if (storedImage && typeof storedImage === 'object') {
         const parseValue = (value, fallback) => {
           const numeric = Number(value);
@@ -2457,6 +2546,11 @@
         spaceSelect.value !== selectedSpace
       ) {
         spaceSelect.value = selectedSpace;
+      }
+      if (Array.isArray(spaceOrder)) {
+        setSpaceAdjustmentOrder(spaceOrder);
+      } else {
+        setSpaceAdjustmentOrder([]);
       }
     }
 
@@ -2495,7 +2589,8 @@
               saturation: clamp(imageAdjustments.saturation ?? 100, 0, 200)
             },
             spaceAdjustments: serializeSpaceAdjustmentState(),
-            selectedSpace: spaceSelect?.value ?? 'rgb'
+            selectedSpace: spaceSelect?.value ?? 'rgb',
+            spaceOrder: serializeSpaceAdjustmentOrder()
           })
         );
       } catch (error) {
@@ -2521,6 +2616,42 @@
         }
       });
       return serialized;
+    }
+
+    function serializeSpaceAdjustmentOrder() {
+      const entries = collectActiveSpaceAdjustmentEntries();
+      return entries.map((entry) => entry.mode);
+    }
+
+    function setSpaceAdjustmentOrder(order = []) {
+      if (!Array.isArray(order)) {
+        spaceAdjustmentOrder = [];
+        return;
+      }
+      const deduped = [];
+      order.forEach((mode) => {
+        if (typeof mode !== 'string') return;
+        if (!colorSpaceAdjustmentDefinitions[mode]) return;
+        if (deduped.includes(mode)) return;
+        deduped.push(mode);
+      });
+      spaceAdjustmentOrder = deduped;
+    }
+
+    function ensureModeInOrder(mode) {
+      if (!mode || typeof mode !== 'string') return;
+      if (!colorSpaceAdjustmentDefinitions[mode]) return;
+      if (!spaceAdjustmentOrder.includes(mode)) {
+        spaceAdjustmentOrder.push(mode);
+      }
+    }
+
+    function removeModeFromOrder(mode) {
+      if (!mode) return;
+      const index = spaceAdjustmentOrder.indexOf(mode);
+      if (index !== -1) {
+        spaceAdjustmentOrder.splice(index, 1);
+      }
     }
 
     function applyStoredSpaceAdjustments(savedSpaces) {
@@ -2719,6 +2850,7 @@
       if (!spaceSelect) return;
       const mode = spaceSelect.value;
       const changed = setSpaceAdjustmentsToDefault(mode);
+      removeModeFromOrder(mode);
       renderSpaceAdjustmentControls();
       if (changed) {
         handleSpaceAdjustmentChange();
@@ -2740,6 +2872,7 @@
         }
       });
       renderSpaceAdjustmentControls();
+      setSpaceAdjustmentOrder([]);
       if (changed) {
         handleSpaceAdjustmentChange();
         persistAdjustmentState({ immediate: true });
@@ -2776,6 +2909,7 @@
           clearSpaceAdjustmentsButton.disabled = true;
           clearSpaceAdjustmentsButton.setAttribute('aria-disabled', 'true');
         }
+        setSpaceModTrashAvailability(false);
         return;
       }
       const summaryHtml = entries
@@ -2800,7 +2934,7 @@
             return '';
           }
           return `
-            <li class="space-mod-item">
+            <li class="space-mod-item" data-space-mod="${mode}">
               <button
                 type="button"
                 class="space-mod-remove"
@@ -2823,6 +2957,7 @@
           clearSpaceAdjustmentsButton.disabled = true;
           clearSpaceAdjustmentsButton.setAttribute('aria-disabled', 'true');
         }
+        setSpaceModTrashAvailability(false);
         return;
       }
       spaceModificationsList.innerHTML = summaryHtml;
@@ -2830,6 +2965,158 @@
         clearSpaceAdjustmentsButton.disabled = false;
         clearSpaceAdjustmentsButton.removeAttribute('aria-disabled');
       }
+      setSpaceModTrashAvailability(true);
+    }
+
+    function initializeSpaceModificationDragAndDrop() {
+      if (!spaceModificationsList) return;
+      spaceModificationsList.addEventListener('pointerdown', handleSpaceModPointerDown);
+    }
+
+    function handleSpaceModPointerDown(event) {
+      if (!spaceModificationsList || spaceModDragState) return;
+      const item = event.target.closest('.space-mod-item');
+      if (!item) return;
+      if (event.target.closest('.space-mod-remove')) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      const mode = item.getAttribute('data-space-mod');
+      if (!mode) return;
+      spaceModDragState = {
+        pointerId: event.pointerId,
+        item,
+        mode,
+        startX: event.clientX,
+        startY: event.clientY,
+        dragging: false,
+        overTrash: false
+      };
+      item.setPointerCapture?.(event.pointerId);
+      window.addEventListener('pointermove', handleSpaceModPointerMove, { passive: false });
+      window.addEventListener('pointerup', handleSpaceModPointerEnd);
+      window.addEventListener('pointercancel', handleSpaceModPointerEnd);
+    }
+
+    function handleSpaceModPointerMove(event) {
+      if (!spaceModDragState || event.pointerId !== spaceModDragState.pointerId) return;
+      const { startX, startY, item } = spaceModDragState;
+      const deltaX = event.clientX - startX;
+      const deltaY = event.clientY - startY;
+      if (!spaceModDragState.dragging) {
+        const distance = Math.hypot(deltaX, deltaY);
+        if (distance < SPACE_MOD_DRAG_THRESHOLD) {
+          return;
+        }
+        spaceModDragState.dragging = true;
+        item.classList.add('dragging');
+        item.setAttribute('aria-grabbed', 'true');
+        spaceModificationsList.classList.add('drag-active');
+        setSpaceModTrashDragState(true);
+      }
+      event.preventDefault();
+      const afterElement = getSpaceModAfterElement(spaceModificationsList, event.clientY);
+      if (!afterElement) {
+        spaceModificationsList.appendChild(item);
+      } else if (afterElement !== item) {
+        spaceModificationsList.insertBefore(item, afterElement);
+      }
+      updateSpaceModTrashHover(event);
+    }
+
+    function handleSpaceModPointerEnd(event) {
+      if (!spaceModDragState || event.pointerId !== spaceModDragState.pointerId) return;
+      spaceModDragState.item.releasePointerCapture?.(spaceModDragState.pointerId);
+      window.removeEventListener('pointermove', handleSpaceModPointerMove);
+      window.removeEventListener('pointerup', handleSpaceModPointerEnd);
+      window.removeEventListener('pointercancel', handleSpaceModPointerEnd);
+      const { dragging, overTrash, mode, item } = spaceModDragState;
+      if (dragging) {
+        event.preventDefault();
+        item.classList.remove('dragging');
+        item.removeAttribute('aria-grabbed');
+        spaceModificationsList.classList.remove('drag-active');
+        setSpaceModTrashHoverState(false);
+        setSpaceModTrashDragState(false);
+        if (overTrash && mode) {
+          const changed = setSpaceAdjustmentsToDefault(mode);
+          if (spaceSelect?.value === mode) {
+            renderSpaceAdjustmentControls();
+          }
+          if (changed) {
+            handleSpaceAdjustmentChange();
+            persistAdjustmentState({ immediate: true });
+          } else {
+            syncSpaceModificationSummary();
+          }
+        } else {
+          updateSpaceAdjustmentOrderFromDom();
+          persistAdjustmentState({ immediate: true });
+        }
+      } else {
+        setSpaceModTrashHoverState(false);
+        setSpaceModTrashDragState(false);
+      }
+      spaceModDragState = null;
+    }
+
+    function getSpaceModAfterElement(container, y) {
+      const siblings = [...container.querySelectorAll('.space-mod-item:not(.dragging)')];
+      return siblings
+        .reduce(
+          (closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - (box.top + box.height / 2);
+            if (offset < 0 && offset > closest.offset) {
+              return { offset, element: child };
+            }
+            return closest;
+          },
+          { offset: Number.NEGATIVE_INFINITY, element: null }
+        )
+        .element;
+    }
+
+    function updateSpaceAdjustmentOrderFromDom() {
+      if (!spaceModificationsList) return;
+      const modes = Array.from(spaceModificationsList.querySelectorAll('.space-mod-item'))
+        .map((node) => node.getAttribute('data-space-mod'))
+        .filter(Boolean);
+      setSpaceAdjustmentOrder(modes);
+    }
+
+    function updateSpaceModTrashHover(event) {
+      if (!spaceModTrash || !spaceModDragState?.dragging) return;
+      const rect = spaceModTrash.getBoundingClientRect();
+      const isOver =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+      if (isOver === spaceModDragState.overTrash) return;
+      spaceModDragState.overTrash = isOver;
+      setSpaceModTrashHoverState(isOver);
+    }
+
+    function setSpaceModTrashAvailability(isAvailable) {
+      if (!spaceModTrash) return;
+      spaceModTrash.classList.toggle('is-hidden', !isAvailable);
+      if (isAvailable) {
+        spaceModTrash.removeAttribute('aria-hidden');
+      } else {
+        spaceModTrash.setAttribute('aria-hidden', 'true');
+      }
+    }
+
+    function setSpaceModTrashDragState(isActive) {
+      if (!spaceModTrash) return;
+      spaceModTrash.classList.toggle('is-drag-target', Boolean(isActive));
+      if (!isActive) {
+        spaceModTrash.classList.remove('is-hovered');
+      }
+    }
+
+    function setSpaceModTrashHoverState(isHovered) {
+      if (!spaceModTrash) return;
+      spaceModTrash.classList.toggle('is-hovered', Boolean(isHovered));
     }
 
     function setSpaceAdjustmentsToDefault(mode) {
@@ -2845,6 +3132,7 @@
           changed = true;
         }
       });
+      removeModeFromOrder(mode);
       return changed;
     }
 
