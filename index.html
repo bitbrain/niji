@@ -144,6 +144,10 @@
       color: #ffecd9;
     }
 
+    .color-space-block {
+      position: relative;
+    }
+
     .panel-header {
       margin-bottom: 0.1rem;
     }
@@ -154,6 +158,71 @@
       letter-spacing: 0.08em;
       color: #ffdac1;
       font-weight: 600;
+    }
+
+    .info-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 0.4rem;
+      width: 1.1rem;
+      height: 1.1rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      font-size: 0.75rem;
+      line-height: 1;
+      cursor: default;
+      color: #ffe5c9;
+      background: transparent;
+      padding: 0;
+    }
+
+    .info-icon:focus-visible {
+      outline: 2px solid #ffd166;
+      outline-offset: 2px;
+    }
+
+    .info-tooltip {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 0.3rem;
+      padding: 0.5rem 0.7rem;
+      max-width: 260px;
+      border-radius: 0.9rem;
+      background: rgba(20, 9, 5, 0.97);
+      color: #fff4e7;
+      font-size: 0.78rem;
+      line-height: 1.3;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      opacity: 0;
+      transform: translateY(-4px);
+      pointer-events: none;
+      transition: opacity 0.12s ease, transform 0.12s ease;
+      z-index: 10;
+    }
+
+    .info-tooltip.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .info-tooltip-title {
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.74rem;
+      margin-bottom: 0.2rem;
+      color: #ffe0c2;
+    }
+
+    .info-tooltip-axes {
+      display: block;
+      margin-top: 0.35rem;
+      font-size: 0.74rem;
+      color: #ffd2b1;
     }
 
     .adjustments-block {
@@ -423,7 +492,7 @@
 <body>
   <header>
     <h1>niji</h1>
-    <p>Upload a photo, sample its colors, and place them inside a rotatable RGB/Lab/LCh cube.</p>
+    <p>Upload photos and visualize their color space.</p>
   </header>
 
   <input type="file" accept="image/*" id="fileInput" hidden>
@@ -454,12 +523,27 @@
           <span class="panel-title">Options</span>
         </header>
         <div class="controls-row">
-          <label class="control-block">
+          <label class="control-block color-space-block">
             Color space
+            <button
+              type="button"
+              class="info-icon"
+              id="spaceInfoTrigger"
+              aria-label="Information about the selected color space"
+            >?</button>
+            <div class="info-tooltip" id="spaceInfoTooltip" role="status" aria-live="polite"></div>
             <select id="spaceSelect">
               <option value="rgb">RGB</option>
               <option value="lab">Lab</option>
               <option value="lch">LCh</option>
+              <option value="linrgb">Linear RGB</option>
+              <option value="hsl">HSL</option>
+              <option value="hsv">HSV</option>
+              <option value="ycbcr">YCbCr</option>
+              <option value="xyz">XYZ</option>
+              <option value="xyy">xyY</option>
+              <option value="oklab">OKLab</option>
+              <option value="oklch">OKLCH</option>
             </select>
           </label>
           <label class="control-block">
@@ -476,6 +560,16 @@
               <output id="toleranceLabel" for="toleranceSlider">2 ΔE</output>
             </div>
           </label>
+        </div>
+
+        <div class="control-block adjustments-block" id="spaceAdjustmentsBlock">
+          <span class="control-title" id="spaceAdjustmentsTitle">Color space axes</span>
+          <div class="adjustments-group" id="spaceAdjustmentsContainer"></div>
+          <div class="adjustments-actions">
+            <button type="button" class="ghost-button" id="resetSpaceAdjustmentsButton">
+              Reset color space sliders
+            </button>
+          </div>
         </div>
 
         <div class="control-block adjustments-block">
@@ -529,11 +623,17 @@
     const saturationSlider = document.getElementById('saturationSlider');
     const saturationLabel = document.getElementById('saturationLabel');
     const resetAdjustmentsButton = document.getElementById('resetAdjustmentsButton');
+    const spaceAdjustmentsBlock = document.getElementById('spaceAdjustmentsBlock');
+    const spaceAdjustmentsTitle = document.getElementById('spaceAdjustmentsTitle');
+    const spaceAdjustmentsContainer = document.getElementById('spaceAdjustmentsContainer');
+    const resetSpaceAdjustmentsButton = document.getElementById('resetSpaceAdjustmentsButton');
     const imageCanvas = document.getElementById('imageCanvas');
     const resetButton = document.getElementById('resetButton');
     const spaceCanvas = document.getElementById('spaceCanvas');
     const cubeSection = document.getElementById('cubeSection');
     const optionsSection = document.getElementById('optionsSection');
+    const spaceInfoTrigger = document.getElementById('spaceInfoTrigger');
+    const spaceInfoTooltip = document.getElementById('spaceInfoTooltip');
     const imageCtx = imageCanvas.getContext('2d');
     const spaceCtx = spaceCanvas.getContext('2d');
     const sampleCanvas = document.createElement('canvas');
@@ -562,10 +662,553 @@
     const axisLabels = {
       rgb: ['R', 'G', 'B'],
       lab: ['a*', 'b*', 'L*'],
-      lch: ['C*', 'h°', 'L*']
+      lch: ['C*', 'h°', 'L*'],
+      linrgb: ['R (lin)', 'G (lin)', 'B (lin)'],
+      hsl: ['H°', 'S', 'L'],
+      hsv: ['H°', 'S', 'V'],
+      ycbcr: ['Y', 'Cb', 'Cr'],
+      xyz: ['X', 'Y', 'Z'],
+      xyy: ['x', 'y', 'Y'],
+      oklab: ['L', 'a', 'b'],
+      oklch: ['L', 'C', 'h°']
     };
 
     const MAX_CHROMA = 150;
+    const OK_MAX_CHROMA = 0.4;
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const REF_WHITE_X = 0.95047;
+    const REF_WHITE_Y = 1.0;
+    const REF_WHITE_Z = 1.08883;
+
+    const spaceDescriptions = {
+      rgb: {
+        title: 'RGB (sRGB)',
+        body: 'Standard display color space. Values describe red, green and blue channel intensities of your monitor.',
+        axes: 'R / G / B: channel intensities from dark (0) to bright (255).'
+      },
+      lab: {
+        title: 'CIELAB (Lab)',
+        body: 'Perceptually uniform space designed so equal distances roughly match equal visual differences.',
+        axes: 'a*: green (−) to red (+), b*: blue (−) to yellow (+), L*: lightness from dark to light.'
+      },
+      lch: {
+        title: 'CIELCh (LCh)',
+        body: 'Lab in cylindrical form: lightness, chroma and hue angle, closer to how we talk about color.',
+        axes: 'L*: lightness, C*: chroma (colorfulness), h°: hue angle around the circle.'
+      },
+      linrgb: {
+        title: 'Linear RGB',
+        body: 'Same primaries as sRGB but without gamma, useful for showing how light actually adds up.',
+        axes: 'R (lin) / G (lin) / B (lin): linear channel intensities proportional to light.'
+      },
+      hsl: {
+        title: 'HSL',
+        body: 'Hue–Saturation–Lightness, similar to many design tool sliders, but not perceptually uniform.',
+        axes: 'H°: hue angle, S: saturation from gray to vivid, L: lightness from dark to light.'
+      },
+      hsv: {
+        title: 'HSV',
+        body: 'Hue–Saturation–Value, common in pickers where “value” tracks the brightest channel.',
+        axes: 'H°: hue angle, S: saturation, V: value/brightness.'
+      },
+      ycbcr: {
+        title: 'YCbCr',
+        body: 'Luma–chroma space widely used in video and compression formats.',
+        axes: 'Y: luma (brightness), Cb: blue–difference chroma, Cr: red–difference chroma.'
+      },
+      xyz: {
+        title: 'CIEXYZ',
+        body: 'Device‑independent foundation of colorimetry based on human cone responses.',
+        axes: 'X / Y / Z: tristimulus values relative to a reference white.'
+      },
+      xyy: {
+        title: 'xyY',
+        body: 'Chromaticity plus luminance: separates color of the light from its intensity.',
+        axes: 'x, y: chromaticity coordinates; Y: luminance/lightness.'
+      },
+      oklab: {
+        title: 'OKLab',
+        body: 'Modern perceptual space with smoother hue lines and more uniform lightness than Lab.',
+        axes: 'L: lightness, a: green (−) to red (+), b: blue (−) to yellow (+).'
+      },
+      oklch: {
+        title: 'OKLCH',
+        body: 'Cylindrical OKLab that behaves well for modern color gradients and palettes.',
+        axes: 'L: lightness, C: chroma (color strength), h°: hue angle.'
+      }
+    };
+
+    const colorSpaceAdjustmentDefinitions = {
+      rgb: {
+        title: 'RGB axes',
+        axes: [
+          {
+            id: 'r',
+            label: 'Red',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * 255
+          },
+          {
+            id: 'g',
+            label: 'Green',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * 255
+          },
+          {
+            id: 'b',
+            label: 'Blue',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * 255
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          return [
+            clamp(Math.round(rgb[0] + (deltas.r ?? 0)), 0, 255),
+            clamp(Math.round(rgb[1] + (deltas.g ?? 0)), 0, 255),
+            clamp(Math.round(rgb[2] + (deltas.b ?? 0)), 0, 255)
+          ];
+        }
+      },
+      lab: {
+        title: 'Lab axes',
+        axes: [
+          {
+            id: 'L',
+            label: 'L*',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatSigned
+          },
+          {
+            id: 'a',
+            label: 'a*',
+            min: -150,
+            max: 150,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatSigned
+          },
+          {
+            id: 'b',
+            label: 'b*',
+            min: -150,
+            max: 150,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatSigned
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const lab = rgbToLab(rgb[0], rgb[1], rgb[2]);
+          const nextL = clamp(lab.L + (deltas.L ?? 0), 0, 100);
+          const nextA = clamp(lab.a + (deltas.a ?? 0), -150, 150);
+          const nextB = clamp(lab.b + (deltas.b ?? 0), -150, 150);
+          const nextRgb = labToRgb(nextL, nextA, nextB);
+          return nextRgb ?? rgb;
+        }
+      },
+      lch: {
+        title: 'LCh axes',
+        axes: [
+          {
+            id: 'L',
+            label: 'Lightness',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatSigned
+          },
+          {
+            id: 'C',
+            label: 'Chroma',
+            min: -150,
+            max: 150,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatSigned
+          },
+          {
+            id: 'h',
+            label: 'Hue',
+            min: -180,
+            max: 180,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatDegreeLabel
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const lab = rgbToLab(rgb[0], rgb[1], rgb[2]);
+          const lch = labToLch(lab.L, lab.a, lab.b);
+          const nextL = clamp(lch.L + (deltas.L ?? 0), 0, 100);
+          const nextC = clamp(lch.C + (deltas.C ?? 0), 0, MAX_CHROMA);
+          const nextH = wrapDegrees((Number.isFinite(lch.h) ? lch.h : 0) + (deltas.h ?? 0));
+          const nextLab = lchToLab(nextL, nextC, nextH);
+          const nextRgb = labToRgb(nextLab.L, nextLab.a, nextLab.b);
+          return nextRgb ?? rgb;
+        }
+      },
+      linrgb: {
+        title: 'Linear RGB axes',
+        axes: [
+          {
+            id: 'r',
+            label: 'Red (lin)',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'g',
+            label: 'Green (lin)',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'b',
+            label: 'Blue (lin)',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const [rLin, gLin, bLin] = rgbToLinearRgb(
+            rgb[0] / 255,
+            rgb[1] / 255,
+            rgb[2] / 255
+          );
+          const nextR = clamp(rLin + (deltas.r ?? 0), 0, 1);
+          const nextG = clamp(gLin + (deltas.g ?? 0), 0, 1);
+          const nextB = clamp(bLin + (deltas.b ?? 0), 0, 1);
+          return linearRgbToSrgb(nextR, nextG, nextB);
+        }
+      },
+      hsl: {
+        title: 'HSL axes',
+        axes: [
+          {
+            id: 'h',
+            label: 'Hue',
+            min: -180,
+            max: 180,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatDegreeLabel
+          },
+          {
+            id: 's',
+            label: 'Saturation',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'l',
+            label: 'Lightness',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const hsl = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+          const hue = Number.isFinite(hsl.h) ? hsl.h : 0;
+          const nextH = wrapDegrees(hue + (deltas.h ?? 0));
+          const nextS = clamp(hsl.s + (deltas.s ?? 0), 0, 1);
+          const nextL = clamp(hsl.l + (deltas.l ?? 0), 0, 1);
+          return hslToRgb(nextH, nextS, nextL);
+        }
+      },
+      hsv: {
+        title: 'HSV axes',
+        axes: [
+          {
+            id: 'h',
+            label: 'Hue',
+            min: -180,
+            max: 180,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatDegreeLabel
+          },
+          {
+            id: 's',
+            label: 'Saturation',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'v',
+            label: 'Value',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const hsv = rgbToHsv(rgb[0], rgb[1], rgb[2]);
+          const hue = Number.isFinite(hsv.h) ? hsv.h : 0;
+          const nextH = wrapDegrees(hue + (deltas.h ?? 0));
+          const nextS = clamp(hsv.s + (deltas.s ?? 0), 0, 1);
+          const nextV = clamp(hsv.v + (deltas.v ?? 0), 0, 1);
+          return hsvToRgb(nextH, nextS, nextV);
+        }
+      },
+      ycbcr: {
+        title: 'YCbCr axes',
+        axes: [
+          {
+            id: 'y',
+            label: 'Y (luma)',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'cb',
+            label: 'Cb',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'cr',
+            label: 'Cr',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const { y, cb, cr } = rgbToYcbcr(rgb[0], rgb[1], rgb[2]);
+          const nextY = clamp(y + (deltas.y ?? 0), 0, 1);
+          const nextCb = clamp(cb + (deltas.cb ?? 0), 0, 1);
+          const nextCr = clamp(cr + (deltas.cr ?? 0), 0, 1);
+          return ycbcrToRgb(nextY, nextCb, nextCr);
+        }
+      },
+      xyz: {
+        title: 'XYZ axes',
+        axes: [
+          {
+            id: 'x',
+            label: 'X',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * REF_WHITE_X
+          },
+          {
+            id: 'y',
+            label: 'Y',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * REF_WHITE_Y
+          },
+          {
+            id: 'z',
+            label: 'Z',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * REF_WHITE_Z
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const xyz = rgbToXyz(rgb[0], rgb[1], rgb[2]);
+          const nextX = clamp(xyz[0] + (deltas.x ?? 0), 0, REF_WHITE_X);
+          const nextY = clamp(xyz[1] + (deltas.y ?? 0), 0, REF_WHITE_Y);
+          const nextZ = clamp(xyz[2] + (deltas.z ?? 0), 0, REF_WHITE_Z);
+          const nextRgb = xyzToRgb(nextX, nextY, nextZ);
+          return nextRgb ?? rgb;
+        }
+      },
+      xyy: {
+        title: 'xyY axes',
+        axes: [
+          {
+            id: 'x',
+            label: 'x',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'y',
+            label: 'y',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'Y',
+            label: 'Y (luminance)',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const xyz = rgbToXyz(rgb[0], rgb[1], rgb[2]);
+          const { x, y, Y } = xyzToXyy(xyz[0], xyz[1], xyz[2]);
+          const nextX = clamp(x + (deltas.x ?? 0), 0, 1);
+          const nextY = clamp(y + (deltas.y ?? 0), 0, 1);
+          const nextLuma = clamp(Y + (deltas.Y ?? 0), 0, 1);
+          const xyzNext = xyyToXyz(nextX, Math.max(nextY, 0.0001), nextLuma);
+          const nextRgb = xyzToRgb(xyzNext.x, xyzNext.y, xyzNext.z);
+          return nextRgb ?? rgb;
+        }
+      },
+      oklab: {
+        title: 'OKLab axes',
+        axes: [
+          {
+            id: 'L',
+            label: 'L',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'a',
+            label: 'a',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * OK_MAX_CHROMA
+          },
+          {
+            id: 'b',
+            label: 'b',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * OK_MAX_CHROMA
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const oklab = rgbToOklab(rgb[0], rgb[1], rgb[2]);
+          const nextL = clamp(oklab.L + (deltas.L ?? 0), 0, 1);
+          const nextA = clamp(oklab.a + (deltas.a ?? 0), -OK_MAX_CHROMA, OK_MAX_CHROMA);
+          const nextB = clamp(oklab.b + (deltas.b ?? 0), -OK_MAX_CHROMA, OK_MAX_CHROMA);
+          return oklabToRgb(nextL, nextA, nextB);
+        }
+      },
+      oklch: {
+        title: 'OKLCH axes',
+        axes: [
+          {
+            id: 'L',
+            label: 'Lightness',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => value / 100
+          },
+          {
+            id: 'C',
+            label: 'Chroma',
+            min: -100,
+            max: 100,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatPercentLabel,
+            toDelta: (value) => (value / 100) * OK_MAX_CHROMA
+          },
+          {
+            id: 'h',
+            label: 'Hue',
+            min: -180,
+            max: 180,
+            step: 1,
+            defaultValue: 0,
+            formatter: formatDegreeLabel
+          }
+        ],
+        apply(rgb, deltas = {}) {
+          const oklab = rgbToOklab(rgb[0], rgb[1], rgb[2]);
+          const oklch = oklabToOklch(oklab.L, oklab.a, oklab.b);
+          const nextL = clamp(oklch.L + (deltas.L ?? 0), 0, 1);
+          const nextC = clamp(oklch.C + (deltas.C ?? 0), 0, OK_MAX_CHROMA);
+          const nextH = wrapDegrees((Number.isFinite(oklch.h) ? oklch.h : 0) + (deltas.h ?? 0));
+          const nextLab = oklchToOklab(nextL, nextC, nextH);
+          return oklabToRgb(nextLab.L, nextLab.a, nextLab.b);
+        }
+      }
+    };
     const HOVER_PICK_RADIUS = 9;
     const BASE_POINT_RADIUS = 3;
     const HOVER_RADIUS_DELTA = 4;
@@ -579,9 +1222,10 @@
       contrast: 0,
       saturation: 100
     });
-    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
     const referenceGrid = createReferenceGrid(6);
+    const spaceAdjustmentState = {};
+    const spaceAxisElements = new Map();
 
     let loadedImage = null;
     let samples = [];
@@ -621,6 +1265,9 @@
     spaceSelect.addEventListener('change', () => {
       clearHover(false);
       requestRender();
+      updateSpaceInfo();
+      renderSpaceAdjustmentControls();
+      handleSpaceAdjustmentChange();
     });
     sampleSlider.addEventListener('input', handleSampleChange);
     toleranceSlider?.addEventListener('input', handleToleranceChange);
@@ -628,6 +1275,7 @@
     contrastSlider?.addEventListener('input', () => handleAdjustmentChange('contrast'));
     saturationSlider?.addEventListener('input', () => handleAdjustmentChange('saturation'));
     resetAdjustmentsButton?.addEventListener('click', resetAdjustments);
+    resetSpaceAdjustmentsButton?.addEventListener('click', resetSpaceAdjustmentsForCurrentMode);
     imageCanvas.addEventListener('click', handleImageClick);
     imageCanvas.addEventListener('keydown', handlePreviewKey);
     imageCanvas.addEventListener('mousemove', handleImageHover);
@@ -664,14 +1312,46 @@
     syncSampleLabel();
     syncToleranceLabel();
     syncAdjustmentLabels();
+    renderSpaceAdjustmentControls();
     setColorUiVisible(false);
+    updateSpaceInfo();
     initializeCanvases();
     drawPlaceholderImage();
     requestAnimationFrame(animationLoop);
 
+    if (spaceInfoTrigger && spaceInfoTooltip) {
+      spaceInfoTrigger.addEventListener('mouseenter', () => {
+        spaceInfoTooltip.classList.add('visible');
+      });
+      spaceInfoTrigger.addEventListener('mouseleave', () => {
+        spaceInfoTooltip.classList.remove('visible');
+      });
+      spaceInfoTrigger.addEventListener('focus', () => {
+        spaceInfoTooltip.classList.add('visible');
+      });
+      spaceInfoTrigger.addEventListener('blur', () => {
+        spaceInfoTooltip.classList.remove('visible');
+      });
+    }
+
     function initializeCanvases() {
       resizeCanvas(imageCanvas);
       resizeCanvas(spaceCanvas);
+    }
+
+    function updateSpaceInfo() {
+      if (!spaceInfoTooltip || !spaceSelect) return;
+      const mode = spaceSelect.value;
+      const info = spaceDescriptions[mode];
+      if (!info) {
+        spaceInfoTooltip.textContent = '';
+        return;
+      }
+      spaceInfoTooltip.innerHTML = `
+        <div class="info-tooltip-title">${info.title}</div>
+        <div>${info.body}</div>
+        <span class="info-tooltip-axes">${info.axes}</span>
+      `;
     }
 
     function resizeCanvas(canvas) {
@@ -763,7 +1443,14 @@
       if (adjustmentContext.isIdentity) {
         return [r, g, b];
       }
-      const { brightnessOffset, contrastFactor, saturationFactor } = adjustmentContext;
+      const {
+        brightnessOffset,
+        contrastFactor,
+        saturationFactor,
+        spaceAdjustmentDescriptor,
+        spaceAxisDeltas,
+        hasSpaceAdjustments
+      } = adjustmentContext;
       let nr = (r - 128) * contrastFactor + 128 + brightnessOffset;
       let ng = (g - 128) * contrastFactor + 128 + brightnessOffset;
       let nb = (b - 128) * contrastFactor + 128 + brightnessOffset;
@@ -771,10 +1458,29 @@
       nr = gray + (nr - gray) * saturationFactor;
       ng = gray + (ng - gray) * saturationFactor;
       nb = gray + (nb - gray) * saturationFactor;
-      return [
+      let adjusted = [
         clamp(Math.round(nr), 0, 255),
         clamp(Math.round(ng), 0, 255),
         clamp(Math.round(nb), 0, 255)
+      ];
+      if (hasSpaceAdjustments && spaceAdjustmentDescriptor && spaceAxisDeltas) {
+        adjusted = applyColorSpaceDynamicAdjustment(adjusted, spaceAdjustmentDescriptor, spaceAxisDeltas);
+      }
+      return adjusted;
+    }
+
+    function applyColorSpaceDynamicAdjustment(rgb, descriptor, deltas) {
+      if (!descriptor || typeof descriptor.apply !== 'function' || !deltas) {
+        return rgb;
+      }
+      const next = descriptor.apply(rgb, deltas);
+      if (!Array.isArray(next) || next.length !== 3) {
+        return rgb;
+      }
+      return [
+        clamp(Math.round(next[0]), 0, 255),
+        clamp(Math.round(next[1]), 0, 255),
+        clamp(Math.round(next[2]), 0, 255)
       ];
     }
 
@@ -782,11 +1488,24 @@
       const brightness = clamp(imageAdjustments.brightness ?? 0, -100, 100);
       const contrast = clamp(imageAdjustments.contrast ?? 0, -100, 100);
       const saturation = clamp(imageAdjustments.saturation ?? 100, 0, 200);
+      const mode = spaceSelect?.value ?? 'rgb';
+      const descriptor = colorSpaceAdjustmentDefinitions[mode];
+      const { deltas, hasAdjustments } = descriptor
+        ? getSpaceAdjustmentDeltas(mode)
+        : { deltas: null, hasAdjustments: false };
       const brightnessOffset = (brightness / 100) * 255;
       const contrastFactor = (contrast + 100) / 100;
       const saturationFactor = saturation / 100;
-      const isIdentity = brightness === 0 && contrast === 0 && saturation === 100;
-      return { brightnessOffset, contrastFactor, saturationFactor, isIdentity };
+      const isIdentity = brightness === 0 && contrast === 0 && saturation === 100 && !hasAdjustments;
+      return {
+        brightnessOffset,
+        contrastFactor,
+        saturationFactor,
+        isIdentity,
+        spaceAdjustmentDescriptor: descriptor,
+        spaceAxisDeltas: deltas,
+        hasSpaceAdjustments: hasAdjustments
+      };
     }
 
     function drawPlaceholderImage() {
@@ -1047,6 +1766,100 @@
           x: clamp(sample.lch.C / MAX_CHROMA, 0, 1),
           y: clamp(hue / 360, 0, 1),
           z: clamp(sample.lch.L / 100, 0, 1)
+        };
+      }
+      if (mode === 'linrgb') {
+        const [rLin, gLin, bLin] = rgbToLinearRgb(
+          sample.rgb[0] / 255,
+          sample.rgb[1] / 255,
+          sample.rgb[2] / 255
+        );
+        return {
+          x: clamp(rLin, 0, 1),
+          y: clamp(gLin, 0, 1),
+          z: clamp(bLin, 0, 1)
+        };
+      }
+      if (mode === 'hsl') {
+        const { h, s, l } = rgbToHsl(
+          sample.rgb[0],
+          sample.rgb[1],
+          sample.rgb[2]
+        );
+        const hue = Number.isFinite(h) ? h : 0;
+        return {
+          x: clamp(hue / 360, 0, 1),
+          y: clamp(s, 0, 1),
+          z: clamp(l, 0, 1)
+        };
+      }
+      if (mode === 'hsv') {
+        const { h, s, v } = rgbToHsv(
+          sample.rgb[0],
+          sample.rgb[1],
+          sample.rgb[2]
+        );
+        const hue = Number.isFinite(h) ? h : 0;
+        return {
+          x: clamp(hue / 360, 0, 1),
+          y: clamp(s, 0, 1),
+          z: clamp(v, 0, 1)
+        };
+      }
+      if (mode === 'ycbcr') {
+        const { y, cb, cr } = rgbToYcbcr(
+          sample.rgb[0],
+          sample.rgb[1],
+          sample.rgb[2]
+        );
+        return {
+          x: clamp(y, 0, 1),
+          y: clamp(cb, 0, 1),
+          z: clamp(cr, 0, 1)
+        };
+      }
+      if (mode === 'xyz' || mode === 'xyy') {
+        const [x, y, z] = rgbToXyz(
+          sample.rgb[0],
+          sample.rgb[1],
+          sample.rgb[2]
+        );
+        if (mode === 'xyz') {
+          return {
+            x: clamp(x / 0.95047, 0, 1),
+            y: clamp(y / 1.0, 0, 1),
+            z: clamp(z / 1.08883, 0, 1)
+          };
+        }
+        const sum = x + y + z;
+        const xx = sum > 0 ? x / sum : 0;
+        const yy = sum > 0 ? y / sum : 0;
+        return {
+          x: clamp(xx, 0, 1),
+          y: clamp(yy, 0, 1),
+          z: clamp(y / 1.0, 0, 1)
+        };
+      }
+      if (mode === 'oklab' || mode === 'oklch') {
+        const oklab = rgbToOklab(
+          sample.rgb[0],
+          sample.rgb[1],
+          sample.rgb[2]
+        );
+        if (mode === 'oklab') {
+          return {
+            x: clamp(0.5 + oklab.a / (2 * OK_MAX_CHROMA), 0, 1),
+            y: clamp(0.5 + oklab.b / (2 * OK_MAX_CHROMA), 0, 1),
+            z: clamp(oklab.L, 0, 1)
+          };
+        }
+        const C = Math.sqrt(oklab.a * oklab.a + oklab.b * oklab.b);
+        const h = (Math.atan2(oklab.b, oklab.a) * 180) / Math.PI;
+        const hue = Number.isFinite(h) ? (h < 0 ? h + 360 : h) : 0;
+        return {
+          x: clamp(C / OK_MAX_CHROMA, 0, 1),
+          y: clamp(hue / 360, 0, 1),
+          z: clamp(oklab.L, 0, 1)
         };
       }
       return null;
@@ -1616,10 +2429,175 @@
       }
     }
 
+    function formatNumber(value) {
+      if (Number.isInteger(value)) return `${value}`;
+      return value.toFixed(2).replace(/\.?0+$/, '');
+    }
+
     function formatSigned(value) {
-      if (value > 0) return `+${value}`;
-      if (value < 0) return `${value}`;
+      if (value > 0) return `+${formatNumber(value)}`;
+      if (value < 0) return `${formatNumber(value)}`;
       return '0';
+    }
+
+    function formatPercentLabel(value) {
+      return `${formatSigned(value)}%`;
+    }
+
+    function formatDegreeLabel(value) {
+      return `${formatSigned(value)}°`;
+    }
+
+    function renderSpaceAdjustmentControls() {
+      if (!spaceAdjustmentsContainer || !spaceSelect) return;
+      const mode = spaceSelect.value;
+      const descriptor = colorSpaceAdjustmentDefinitions[mode];
+      if (!descriptor) {
+        if (spaceAdjustmentsBlock) {
+          spaceAdjustmentsBlock.classList.add('hidden');
+        }
+        spaceAdjustmentsContainer.innerHTML = '';
+        return;
+      }
+      spaceAdjustmentsBlock?.classList.remove('hidden');
+      if (spaceAdjustmentsTitle) {
+        spaceAdjustmentsTitle.textContent = descriptor.title;
+      }
+      const state = ensureSpaceAdjustmentState(mode);
+      spaceAdjustmentsContainer.innerHTML = '';
+      spaceAxisElements.clear();
+      descriptor.axes.forEach((axis) => {
+        const value = clampAxisValue(state[axis.id] ?? axis.defaultValue ?? 0, axis);
+        state[axis.id] = value;
+        const control = document.createElement('label');
+        control.className = 'sub-control';
+        const title = document.createElement('span');
+        title.className = 'sub-control-title';
+        title.textContent = axis.label;
+        const rangeWrapper = document.createElement('div');
+        rangeWrapper.className = 'range-input';
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = String(axis.min);
+        slider.max = String(axis.max);
+        slider.step = String(axis.step ?? 1);
+        const sliderId = `space-axis-${mode}-${axis.id}`;
+        slider.id = sliderId;
+        slider.value = String(value);
+        slider.dataset.space = mode;
+        slider.dataset.axis = axis.id;
+        slider.addEventListener('input', handleSpaceAxisInput);
+        const output = document.createElement('output');
+        output.setAttribute('for', sliderId);
+        output.textContent = formatAxisValue(axis, value);
+        rangeWrapper.appendChild(slider);
+        rangeWrapper.appendChild(output);
+        control.appendChild(title);
+        control.appendChild(rangeWrapper);
+        spaceAdjustmentsContainer.appendChild(control);
+        spaceAxisElements.set(axisKey(mode, axis.id), { axis, slider, output });
+      });
+    }
+
+    function handleSpaceAxisInput(event) {
+      const slider = event.currentTarget;
+      const mode = slider.dataset.space;
+      const axisId = slider.dataset.axis;
+      if (!mode || !axisId) return;
+      const descriptor = colorSpaceAdjustmentDefinitions[mode];
+      if (!descriptor) return;
+      const axis = descriptor.axes.find((entry) => entry.id === axisId);
+      if (!axis) return;
+      const value = clampAxisValue(parseFloat(slider.value), axis);
+      const state = ensureSpaceAdjustmentState(mode);
+      state[axisId] = value;
+      const key = axisKey(mode, axisId);
+      const entry = spaceAxisElements.get(key);
+      if (entry?.output) {
+        entry.output.textContent = formatAxisValue(axis, value);
+      }
+      handleSpaceAdjustmentChange();
+    }
+
+    function handleSpaceAdjustmentChange() {
+      if (loadedImage) {
+        redrawImage();
+        resampleImage();
+      } else {
+        requestRender();
+      }
+    }
+
+    function resetSpaceAdjustmentsForCurrentMode() {
+      if (!spaceSelect) return;
+      const mode = spaceSelect.value;
+      const descriptor = colorSpaceAdjustmentDefinitions[mode];
+      if (!descriptor) return;
+      const state = ensureSpaceAdjustmentState(mode);
+      let changed = false;
+      descriptor.axes.forEach((axis) => {
+        const defaultValue = axis.defaultValue ?? 0;
+        if (state[axis.id] !== defaultValue) {
+          state[axis.id] = defaultValue;
+          changed = true;
+        }
+      });
+      renderSpaceAdjustmentControls();
+      if (changed) {
+        handleSpaceAdjustmentChange();
+      }
+    }
+
+    function ensureSpaceAdjustmentState(mode) {
+      if (!spaceAdjustmentState[mode]) {
+        const descriptor = colorSpaceAdjustmentDefinitions[mode];
+        const defaults = {};
+        if (descriptor) {
+          descriptor.axes.forEach((axis) => {
+            defaults[axis.id] = axis.defaultValue ?? 0;
+          });
+        }
+        spaceAdjustmentState[mode] = defaults;
+      }
+      return spaceAdjustmentState[mode];
+    }
+
+    function clampAxisValue(value, axis) {
+      if (!Number.isFinite(value)) {
+        return axis.defaultValue ?? 0;
+      }
+      return clamp(value, axis.min, axis.max);
+    }
+
+    function formatAxisValue(axis, value) {
+      if (typeof axis.formatter === 'function') {
+        return axis.formatter(value);
+      }
+      return formatSigned(value);
+    }
+
+    function getSpaceAdjustmentDeltas(mode) {
+      const descriptor = colorSpaceAdjustmentDefinitions[mode];
+      if (!descriptor) {
+        return { deltas: null, hasAdjustments: false };
+      }
+      const state = ensureSpaceAdjustmentState(mode);
+      const deltas = {};
+      let hasAdjustments = false;
+      descriptor.axes.forEach((axis) => {
+        const value = clampAxisValue(state[axis.id] ?? axis.defaultValue ?? 0, axis);
+        state[axis.id] = value;
+        const delta = typeof axis.toDelta === 'function' ? axis.toDelta(value) : value;
+        deltas[axis.id] = delta;
+        if (Math.abs(delta) > (axis.epsilon ?? 1e-4)) {
+          hasAdjustments = true;
+        }
+      });
+      return { deltas, hasAdjustments };
+    }
+
+    function axisKey(mode, axisId) {
+      return `${mode}-${axisId}`;
     }
 
     function rgbToLab(r, g, b) {
@@ -1655,6 +2633,13 @@
       let h = Math.atan2(b, a) * (180 / Math.PI);
       if (h < 0) h += 360;
       return { L, C, h };
+    }
+
+    function wrapDegrees(value) {
+      if (!Number.isFinite(value)) return 0;
+      let wrapped = value % 360;
+      if (wrapped < 0) wrapped += 360;
+      return wrapped;
     }
 
     function lchToLab(L, C, h) {
@@ -1711,6 +2696,228 @@
       ];
     }
 
+    function xyzToXyy(x, y, z) {
+      const sum = x + y + z;
+      if (sum === 0) {
+        return { x: 0, y: 0, Y: 0 };
+      }
+      return {
+        x: x / sum,
+        y: y / sum,
+        Y: y
+      };
+    }
+
+    function xyyToXyz(xChromaticity, yChromaticity, Y) {
+      if (yChromaticity <= 0) {
+        return { x: 0, y: 0, z: 0 };
+      }
+      const X = (Y / yChromaticity) * xChromaticity;
+      const Z = (Y / yChromaticity) * (1 - xChromaticity - yChromaticity);
+      return { x: X, y: Y, z: Z };
+    }
+
+    function rgbToLinearRgb(r, g, b) {
+      return [pivotRgb(r), pivotRgb(g), pivotRgb(b)];
+    }
+
+    function linearRgbToSrgb(r, g, b) {
+      return [
+        Math.round(clamp(srgbFromLinear(r), 0, 1) * 255),
+        Math.round(clamp(srgbFromLinear(g), 0, 1) * 255),
+        Math.round(clamp(srgbFromLinear(b), 0, 1) * 255)
+      ];
+    }
+
+    function rgbToHsl(r, g, b) {
+      r /= 255;
+      g /= 255;
+      b /= 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      let h = 0;
+      const l = (max + min) / 2;
+      const d = max - min;
+      let s = 0;
+      if (d !== 0) {
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r:
+            h = (g - b) / d + (g < b ? 6 : 0);
+            break;
+          case g:
+            h = (b - r) / d + 2;
+            break;
+          case b:
+            h = (r - g) / d + 4;
+            break;
+        }
+        h *= 60;
+      }
+      return { h, s, l };
+    }
+
+    function rgbToHsv(r, g, b) {
+      r /= 255;
+      g /= 255;
+      b /= 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      let h = 0;
+      const v = max;
+      const s = max === 0 ? 0 : d / max;
+      if (d !== 0) {
+        switch (max) {
+          case r:
+            h = (g - b) / d + (g < b ? 6 : 0);
+            break;
+          case g:
+            h = (b - r) / d + 2;
+            break;
+          case b:
+            h = (r - g) / d + 4;
+            break;
+        }
+        h *= 60;
+      }
+      return { h, s, v };
+    }
+
+    function hslToRgb(h, s, l) {
+      h = ((h % 360) + 360) % 360;
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const hp = h / 60;
+      const x = c * (1 - Math.abs((hp % 2) - 1));
+      let r1 = 0, g1 = 0, b1 = 0;
+      if (hp >= 0 && hp < 1) {
+        r1 = c; g1 = x; b1 = 0;
+      } else if (hp >= 1 && hp < 2) {
+        r1 = x; g1 = c; b1 = 0;
+      } else if (hp >= 2 && hp < 3) {
+        r1 = 0; g1 = c; b1 = x;
+      } else if (hp >= 3 && hp < 4) {
+        r1 = 0; g1 = x; b1 = c;
+      } else if (hp >= 4 && hp < 5) {
+        r1 = x; g1 = 0; b1 = c;
+      } else if (hp >= 5 && hp < 6) {
+        r1 = c; g1 = 0; b1 = x;
+      }
+      const m = l - c / 2;
+      return [
+        Math.round(clamp((r1 + m) * 255, 0, 255)),
+        Math.round(clamp((g1 + m) * 255, 0, 255)),
+        Math.round(clamp((b1 + m) * 255, 0, 255))
+      ];
+    }
+
+    function hsvToRgb(h, s, v) {
+      h = ((h % 360) + 360) % 360;
+      const c = v * s;
+      const hp = h / 60;
+      const x = c * (1 - Math.abs((hp % 2) - 1));
+      let r1 = 0, g1 = 0, b1 = 0;
+      if (hp >= 0 && hp < 1) {
+        r1 = c; g1 = x; b1 = 0;
+      } else if (hp >= 1 && hp < 2) {
+        r1 = x; g1 = c; b1 = 0;
+      } else if (hp >= 2 && hp < 3) {
+        r1 = 0; g1 = c; b1 = x;
+      } else if (hp >= 3 && hp < 4) {
+        r1 = 0; g1 = x; b1 = c;
+      } else if (hp >= 4 && hp < 5) {
+        r1 = x; g1 = 0; b1 = c;
+      } else if (hp >= 5 && hp < 6) {
+        r1 = c; g1 = 0; b1 = x;
+      }
+      const m = v - c;
+      return [
+        Math.round(clamp((r1 + m) * 255, 0, 255)),
+        Math.round(clamp((g1 + m) * 255, 0, 255)),
+        Math.round(clamp((b1 + m) * 255, 0, 255))
+      ];
+    }
+
+    function rgbToYcbcr(r, g, b) {
+      const R = r / 255;
+      const G = g / 255;
+      const B = b / 255;
+      const y = 0.299 * R + 0.587 * G + 0.114 * B;
+      const cb = -0.168736 * R - 0.331264 * G + 0.5 * B + 0.5;
+      const cr = 0.5 * R - 0.418688 * G - 0.081312 * B + 0.5;
+      return { y, cb, cr };
+    }
+
+    function ycbcrToRgb(y, cb, cr) {
+      const r = y + 1.402 * (cr - 0.5);
+      const g = y - 0.344136 * (cb - 0.5) - 0.714136 * (cr - 0.5);
+      const b = y + 1.772 * (cb - 0.5);
+      return [
+        Math.round(clamp(r, 0, 1) * 255),
+        Math.round(clamp(g, 0, 1) * 255),
+        Math.round(clamp(b, 0, 1) * 255)
+      ];
+    }
+
+    function rgbToOklab(r, g, b) {
+      const R = pivotRgb(r / 255);
+      const G = pivotRgb(g / 255);
+      const B = pivotRgb(b / 255);
+
+      const l = 0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B;
+      const m = 0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B;
+      const s = 0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B;
+
+      const l_ = Math.cbrt(l);
+      const m_ = Math.cbrt(m);
+      const s_ = Math.cbrt(s);
+
+      const L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+      const a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+      const b2 = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+
+      return { L, a, b: b2 };
+    }
+
+    function oklabToOklch(L, a, b) {
+      const C = Math.sqrt(a * a + b * b);
+      const h = wrapDegrees((Math.atan2(b, a) * 180) / Math.PI);
+      return { L, C, h };
+    }
+
+    function oklchToOklab(L, C, h) {
+      const hr = (h * Math.PI) / 180;
+      return {
+        L,
+        a: Math.cos(hr) * C,
+        b: Math.sin(hr) * C
+      };
+    }
+
+    function oklabToRgb(L, a, b) {
+      const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+      const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+      const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+
+      const l = l_ * l_ * l_;
+      const m = m_ * m_ * m_;
+      const s = s_ * s_ * s_;
+
+      let R = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+      let G = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+      let B = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+
+      R = srgbFromLinear(R);
+      G = srgbFromLinear(G);
+      B = srgbFromLinear(B);
+
+      return [
+        Math.round(clamp(R * 255, 0, 255)),
+        Math.round(clamp(G * 255, 0, 255)),
+        Math.round(clamp(B * 255, 0, 255))
+      ];
+    }
+
     function srgbFromLinear(value) {
       const v = clamp(value, 0, 1);
       return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
@@ -1745,6 +2952,71 @@
       if (mode === 'lch') {
         const lab = lchToLab(coords.z * 100, coords.x * MAX_CHROMA, coords.y * 360);
         return labToRgb(lab.L, lab.a, lab.b);
+      }
+      if (mode === 'linrgb') {
+        const rLin = clamp(coords.x, 0, 1);
+        const gLin = clamp(coords.y, 0, 1);
+        const bLin = clamp(coords.z, 0, 1);
+        return [
+          Math.round(srgbFromLinear(rLin) * 255),
+          Math.round(srgbFromLinear(gLin) * 255),
+          Math.round(srgbFromLinear(bLin) * 255)
+        ];
+      }
+      if (mode === 'hsl') {
+        const h = clamp(coords.x, 0, 1) * 360;
+        const s = clamp(coords.y, 0, 1);
+        const l = clamp(coords.z, 0, 1);
+        return hslToRgb(h, s, l);
+      }
+      if (mode === 'hsv') {
+        const h = clamp(coords.x, 0, 1) * 360;
+        const s = clamp(coords.y, 0, 1);
+        const v = clamp(coords.z, 0, 1);
+        return hsvToRgb(h, s, v);
+      }
+      if (mode === 'ycbcr') {
+        const y = clamp(coords.x, 0, 1);
+        const cb = clamp(coords.y, 0, 1);
+        const cr = clamp(coords.z, 0, 1);
+        const r = y + 1.402 * (cr - 0.5);
+        const g = y - 0.344136 * (cb - 0.5) - 0.714136 * (cr - 0.5);
+        const b = y + 1.772 * (cb - 0.5);
+        return [
+          Math.round(clamp(r, 0, 1) * 255),
+          Math.round(clamp(g, 0, 1) * 255),
+          Math.round(clamp(b, 0, 1) * 255)
+        ];
+      }
+      if (mode === 'xyz') {
+        const X = clamp(coords.x, 0, 1) * 0.95047;
+        const Y = clamp(coords.y, 0, 1) * 1.0;
+        const Z = clamp(coords.z, 0, 1) * 1.08883;
+        return labToRgb(...xyzToLab(X, Y, Z));
+      }
+      if (mode === 'xyy') {
+        const x = clamp(coords.x, 0, 1);
+        const y = clamp(coords.y, 0, 1);
+        const Y = clamp(coords.z, 0, 1);
+        if (y === 0) return [0, 0, 0];
+        const X = (Y / y) * x;
+        const Z = (Y / y) * (1 - x - y);
+        return labToRgb(...xyzToLab(X, Y, Z));
+      }
+      if (mode === 'oklab') {
+        const L = clamp(coords.z, 0, 1);
+        const a = (clamp(coords.x, 0, 1) - 0.5) * (2 * OK_MAX_CHROMA);
+        const b = (clamp(coords.y, 0, 1) - 0.5) * (2 * OK_MAX_CHROMA);
+        return oklabToRgb(L, a, b);
+      }
+      if (mode === 'oklch') {
+        const L = clamp(coords.z, 0, 1);
+        const C = clamp(coords.x, 0, 1) * OK_MAX_CHROMA;
+        const h = clamp(coords.y, 0, 1) * 360;
+        const hr = (h * Math.PI) / 180;
+        const a = Math.cos(hr) * C;
+        const b = Math.sin(hr) * C;
+        return oklabToRgb(L, a, b);
       }
       return null;
     }
