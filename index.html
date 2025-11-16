@@ -456,6 +456,92 @@
       transform: translateY(-2px);
     }
 
+    .space-mod-list {
+      list-style: none;
+      margin: 0.5rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .space-mod-item {
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 0.9rem;
+      padding: 0.65rem 0.85rem;
+      padding-right: 2.65rem;
+      position: relative;
+      box-shadow: none;
+    }
+
+    .space-mod-name {
+      font-weight: 600;
+      color: #ffcfb2;
+      font-size: 0.9rem;
+    }
+
+    .space-mod-values {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      margin-top: 0.35rem;
+      font-size: 0.9rem;
+      color: #fff0e4;
+    }
+
+    .space-mod-values span {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.2rem;
+      white-space: nowrap;
+    }
+
+    .space-mod-value {
+      color: #ffdac1;
+      font-weight: 600;
+    }
+
+    .space-mod-empty {
+      color: rgba(255, 240, 228, 0.8);
+      font-size: 0.9rem;
+      font-style: italic;
+      padding: 0.75rem 0 0;
+    }
+
+    .space-mod-remove {
+      position: absolute;
+      top: 0.15rem;
+      right: 0.35rem;
+      width: 1.85rem;
+      height: 1.85rem;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 240, 228, 0.3);
+      background: rgba(15, 7, 4, 0.8);
+      color: #ffcfb2;
+      font-size: 1.1rem;
+      font-weight: 600;
+      line-height: 1;
+      padding-bottom: 0.2rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transform: scale(0.9);
+      transition: opacity 0.12s ease, transform 0.12s ease;
+      cursor: pointer;
+    }
+
+    .space-mod-item:hover .space-mod-remove,
+    .space-mod-remove:focus-visible {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    #clearSpaceAdjustmentsButton:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     @media (min-width: 1100px) {
       .app-layout {
         display: grid;
@@ -540,8 +626,6 @@
               <option value="hsl">HSL</option>
               <option value="hsv">HSV</option>
               <option value="ycbcr">YCbCr</option>
-              <option value="xyz">XYZ</option>
-              <option value="xyy">xyY</option>
               <option value="oklab">OKLab</option>
               <option value="oklch">OKLCH</option>
             </select>
@@ -568,6 +652,24 @@
           <div class="adjustments-actions">
             <button type="button" class="ghost-button" id="resetSpaceAdjustmentsButton">
               Reset color space sliders
+            </button>
+          </div>
+        </div>
+
+        <div class="control-block adjustments-block" id="spaceModificationsBlock">
+          <span class="control-title">Applied color space modifications</span>
+          <ul class="space-mod-list" id="spaceModificationsList" aria-live="polite">
+            <li class="space-mod-empty">No color space modifications yet.</li>
+          </ul>
+          <div class="adjustments-actions">
+            <button
+              type="button"
+              class="ghost-button"
+              id="clearSpaceAdjustmentsButton"
+              disabled
+              aria-disabled="true"
+            >
+              Clear all modifications
             </button>
           </div>
         </div>
@@ -627,6 +729,8 @@
     const spaceAdjustmentsTitle = document.getElementById('spaceAdjustmentsTitle');
     const spaceAdjustmentsContainer = document.getElementById('spaceAdjustmentsContainer');
     const resetSpaceAdjustmentsButton = document.getElementById('resetSpaceAdjustmentsButton');
+    const spaceModificationsList = document.getElementById('spaceModificationsList');
+    const clearSpaceAdjustmentsButton = document.getElementById('clearSpaceAdjustmentsButton');
     const imageCanvas = document.getElementById('imageCanvas');
     const resetButton = document.getElementById('resetButton');
     const spaceCanvas = document.getElementById('spaceCanvas');
@@ -667,8 +771,6 @@
       hsl: ['H°', 'S', 'L'],
       hsv: ['H°', 'S', 'V'],
       ycbcr: ['Y', 'Cb', 'Cr'],
-      xyz: ['X', 'Y', 'Z'],
-      xyy: ['x', 'y', 'Y'],
       oklab: ['L', 'a', 'b'],
       oklch: ['L', 'C', 'h°']
     };
@@ -676,9 +778,6 @@
     const MAX_CHROMA = 150;
     const OK_MAX_CHROMA = 0.4;
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-    const REF_WHITE_X = 0.95047;
-    const REF_WHITE_Y = 1.0;
-    const REF_WHITE_Z = 1.08883;
 
     const spaceDescriptions = {
       rgb: {
@@ -715,16 +814,6 @@
         title: 'YCbCr',
         body: 'Luma–chroma space widely used in video and compression formats.',
         axes: 'Y: luma (brightness), Cb: blue–difference chroma, Cr: red–difference chroma.'
-      },
-      xyz: {
-        title: 'CIEXYZ',
-        body: 'Device‑independent foundation of colorimetry based on human cone responses.',
-        axes: 'X / Y / Z: tristimulus values relative to a reference white.'
-      },
-      xyy: {
-        title: 'xyY',
-        body: 'Chromaticity plus luminance: separates color of the light from its intensity.',
-        axes: 'x, y: chromaticity coordinates; Y: luminance/lightness.'
       },
       oklab: {
         title: 'OKLab',
@@ -1035,94 +1124,6 @@
           return ycbcrToRgb(nextY, nextCb, nextCr);
         }
       },
-      xyz: {
-        title: 'XYZ axes',
-        axes: [
-          {
-            id: 'x',
-            label: 'X',
-            min: -100,
-            max: 100,
-            step: 1,
-            defaultValue: 0,
-            formatter: formatPercentLabel,
-            toDelta: (value) => (value / 100) * REF_WHITE_X
-          },
-          {
-            id: 'y',
-            label: 'Y',
-            min: -100,
-            max: 100,
-            step: 1,
-            defaultValue: 0,
-            formatter: formatPercentLabel,
-            toDelta: (value) => (value / 100) * REF_WHITE_Y
-          },
-          {
-            id: 'z',
-            label: 'Z',
-            min: -100,
-            max: 100,
-            step: 1,
-            defaultValue: 0,
-            formatter: formatPercentLabel,
-            toDelta: (value) => (value / 100) * REF_WHITE_Z
-          }
-        ],
-        apply(rgb, deltas = {}) {
-          const xyz = rgbToXyz(rgb[0], rgb[1], rgb[2]);
-          const nextX = clamp(xyz[0] + (deltas.x ?? 0), 0, REF_WHITE_X);
-          const nextY = clamp(xyz[1] + (deltas.y ?? 0), 0, REF_WHITE_Y);
-          const nextZ = clamp(xyz[2] + (deltas.z ?? 0), 0, REF_WHITE_Z);
-          const nextRgb = xyzToRgb(nextX, nextY, nextZ);
-          return nextRgb ?? rgb;
-        }
-      },
-      xyy: {
-        title: 'xyY axes',
-        axes: [
-          {
-            id: 'x',
-            label: 'x',
-            min: -100,
-            max: 100,
-            step: 1,
-            defaultValue: 0,
-            formatter: formatPercentLabel,
-            toDelta: (value) => value / 100
-          },
-          {
-            id: 'y',
-            label: 'y',
-            min: -100,
-            max: 100,
-            step: 1,
-            defaultValue: 0,
-            formatter: formatPercentLabel,
-            toDelta: (value) => value / 100
-          },
-          {
-            id: 'Y',
-            label: 'Y (luminance)',
-            min: -100,
-            max: 100,
-            step: 1,
-            defaultValue: 0,
-            formatter: formatPercentLabel,
-            toDelta: (value) => value / 100
-          }
-        ],
-        apply(rgb, deltas = {}) {
-          const xyz = rgbToXyz(rgb[0], rgb[1], rgb[2]);
-          const { x, y, Y } = xyzToXyy(xyz[0], xyz[1], xyz[2]);
-          const nextX = clamp(x + (deltas.x ?? 0), 0, 1);
-          const nextY = clamp(y + (deltas.y ?? 0), 0, 1);
-          const nextLuma = clamp(Y + (deltas.Y ?? 0), 0, 1);
-          const xyzNext = xyyToXyz(nextX, Math.max(nextY, 0.0001), nextLuma);
-          const nextRgb = xyzToRgb(xyzNext.x, xyzNext.y, xyzNext.z);
-          return nextRgb ?? rgb;
-        }
-      },
       oklab: {
         title: 'OKLab axes',
         axes: [
@@ -1226,6 +1227,10 @@
     const referenceGrid = createReferenceGrid(6);
     const spaceAdjustmentState = {};
     const spaceAxisElements = new Map();
+    const ADJUSTMENT_STORAGE_KEY = 'niji-adjustments-v1';
+    const IMAGE_STORAGE_KEY = 'niji-image-v1';
+    const PERSIST_DEBOUNCE_MS = 150;
+    let persistAdjustmentsHandle = null;
 
     let loadedImage = null;
     let samples = [];
@@ -1261,6 +1266,8 @@
     let lastHighlightSample = null;
     let imageDrawRegion = { x: 0, y: 0, width: 0, height: 0 };
 
+    restoreAdjustmentState();
+
     fileInput.addEventListener('change', handleImageUpload);
     spaceSelect.addEventListener('change', () => {
       clearHover(false);
@@ -1268,6 +1275,7 @@
       updateSpaceInfo();
       renderSpaceAdjustmentControls();
       handleSpaceAdjustmentChange();
+      persistAdjustmentState();
     });
     sampleSlider.addEventListener('input', handleSampleChange);
     toleranceSlider?.addEventListener('input', handleToleranceChange);
@@ -1276,6 +1284,8 @@
     saturationSlider?.addEventListener('input', () => handleAdjustmentChange('saturation'));
     resetAdjustmentsButton?.addEventListener('click', resetAdjustments);
     resetSpaceAdjustmentsButton?.addEventListener('click', resetSpaceAdjustmentsForCurrentMode);
+    clearSpaceAdjustmentsButton?.addEventListener('click', clearAllSpaceAdjustments);
+    spaceModificationsList?.addEventListener('click', handleSpaceModificationListClick);
     imageCanvas.addEventListener('click', handleImageClick);
     imageCanvas.addEventListener('keydown', handlePreviewKey);
     imageCanvas.addEventListener('mousemove', handleImageHover);
@@ -1317,6 +1327,7 @@
     updateSpaceInfo();
     initializeCanvases();
     drawPlaceholderImage();
+    restoreImageFromStorage();
     requestAnimationFrame(animationLoop);
 
     if (spaceInfoTrigger && spaceInfoTooltip) {
@@ -1372,6 +1383,14 @@
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
+        // Persist image as base64 in localStorage
+        if (typeof window !== 'undefined' && window.localStorage && typeof reader.result === 'string') {
+          try {
+            window.localStorage.setItem(IMAGE_STORAGE_KEY, reader.result);
+          } catch (error) {
+            console.warn('Unable to persist image', error);
+          }
+        }
         const img = new Image();
         img.onload = () => {
           loadedImage = img;
@@ -1447,8 +1466,7 @@
         brightnessOffset,
         contrastFactor,
         saturationFactor,
-        spaceAdjustmentDescriptor,
-        spaceAxisDeltas,
+        spaceAdjustments,
         hasSpaceAdjustments
       } = adjustmentContext;
       let nr = (r - 128) * contrastFactor + 128 + brightnessOffset;
@@ -1463,8 +1481,10 @@
         clamp(Math.round(ng), 0, 255),
         clamp(Math.round(nb), 0, 255)
       ];
-      if (hasSpaceAdjustments && spaceAdjustmentDescriptor && spaceAxisDeltas) {
-        adjusted = applyColorSpaceDynamicAdjustment(adjusted, spaceAdjustmentDescriptor, spaceAxisDeltas);
+      if (hasSpaceAdjustments && Array.isArray(spaceAdjustments)) {
+        spaceAdjustments.forEach(({ descriptor, deltas }) => {
+          adjusted = applyColorSpaceDynamicAdjustment(adjusted, descriptor, deltas);
+        });
       }
       return adjusted;
     }
@@ -1488,24 +1508,50 @@
       const brightness = clamp(imageAdjustments.brightness ?? 0, -100, 100);
       const contrast = clamp(imageAdjustments.contrast ?? 0, -100, 100);
       const saturation = clamp(imageAdjustments.saturation ?? 100, 0, 200);
-      const mode = spaceSelect?.value ?? 'rgb';
-      const descriptor = colorSpaceAdjustmentDefinitions[mode];
-      const { deltas, hasAdjustments } = descriptor
-        ? getSpaceAdjustmentDeltas(mode)
-        : { deltas: null, hasAdjustments: false };
+      const spaceAdjustments = collectActiveSpaceAdjustmentEntries();
+      const hasSpaceAdjustments = spaceAdjustments.length > 0;
       const brightnessOffset = (brightness / 100) * 255;
       const contrastFactor = (contrast + 100) / 100;
       const saturationFactor = saturation / 100;
-      const isIdentity = brightness === 0 && contrast === 0 && saturation === 100 && !hasAdjustments;
+      const isIdentity = brightness === 0 && contrast === 0 && saturation === 100 && !hasSpaceAdjustments;
       return {
         brightnessOffset,
         contrastFactor,
         saturationFactor,
         isIdentity,
-        spaceAdjustmentDescriptor: descriptor,
-        spaceAxisDeltas: deltas,
-        hasSpaceAdjustments: hasAdjustments
+        spaceAdjustments,
+        hasSpaceAdjustments
       };
+    }
+
+    function collectActiveSpaceAdjustmentEntries() {
+      const preferredMode = spaceSelect?.value ?? null;
+      const modes = new Set(Object.keys(spaceAdjustmentState));
+      if (preferredMode) {
+        modes.add(preferredMode);
+      }
+      const entries = [];
+      modes.forEach((mode) => {
+        const descriptor = colorSpaceAdjustmentDefinitions[mode];
+        if (!descriptor) return;
+        const { deltas, hasAdjustments } = getSpaceAdjustmentDeltas(mode);
+        if (hasAdjustments) {
+          entries.push({ mode, descriptor, deltas });
+        }
+      });
+      if (!preferredMode) {
+        return entries;
+      }
+      const leading = [];
+      const trailing = [];
+      entries.forEach((entry) => {
+        if (entry.mode === preferredMode) {
+          trailing.push(entry);
+        } else {
+          leading.push(entry);
+        }
+      });
+      return [...leading, ...trailing];
     }
 
     function drawPlaceholderImage() {
@@ -1582,6 +1628,14 @@
       setColorUiVisible(false);
       requestRender();
       if (fileInput) fileInput.value = '';
+      // Clear persisted image
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.removeItem(IMAGE_STORAGE_KEY);
+        } catch (error) {
+          // non-fatal
+        }
+      }
     }
 
     function sampleImage(image) {
@@ -1816,28 +1870,6 @@
           x: clamp(y, 0, 1),
           y: clamp(cb, 0, 1),
           z: clamp(cr, 0, 1)
-        };
-      }
-      if (mode === 'xyz' || mode === 'xyy') {
-        const [x, y, z] = rgbToXyz(
-          sample.rgb[0],
-          sample.rgb[1],
-          sample.rgb[2]
-        );
-        if (mode === 'xyz') {
-          return {
-            x: clamp(x / 0.95047, 0, 1),
-            y: clamp(y / 1.0, 0, 1),
-            z: clamp(z / 1.08883, 0, 1)
-          };
-        }
-        const sum = x + y + z;
-        const xx = sum > 0 ? x / sum : 0;
-        const yy = sum > 0 ? y / sum : 0;
-        return {
-          x: clamp(xx, 0, 1),
-          y: clamp(yy, 0, 1),
-          z: clamp(y / 1.0, 0, 1)
         };
       }
       if (mode === 'oklab' || mode === 'oklch') {
@@ -2381,6 +2413,155 @@
       }
     }
 
+    function restoreAdjustmentState() {
+      if (typeof window === 'undefined' || !window.localStorage) {
+        return;
+      }
+      let storedPayload = null;
+      try {
+        const raw = window.localStorage.getItem(ADJUSTMENT_STORAGE_KEY);
+        if (!raw) return;
+        storedPayload = JSON.parse(raw);
+      } catch (error) {
+        console.warn('Unable to parse stored adjustments', error);
+        return;
+      }
+      if (!storedPayload || typeof storedPayload !== 'object') {
+        return;
+      }
+      const { imageAdjustments: storedImage, spaceAdjustments: storedSpaces, selectedSpace } = storedPayload;
+      if (storedImage && typeof storedImage === 'object') {
+        const parseValue = (value, fallback) => {
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? numeric : fallback;
+        };
+        const nextBrightness = clamp(parseValue(storedImage.brightness, 0), -100, 100);
+        const nextContrast = clamp(parseValue(storedImage.contrast, 0), -100, 100);
+        const nextSaturation = clamp(parseValue(storedImage.saturation, 100), 0, 200);
+        imageAdjustments = {
+          brightness: nextBrightness,
+          contrast: nextContrast,
+          saturation: nextSaturation
+        };
+        if (brightnessSlider) brightnessSlider.value = String(nextBrightness);
+        if (contrastSlider) contrastSlider.value = String(nextContrast);
+        if (saturationSlider) saturationSlider.value = String(nextSaturation);
+      }
+      if (storedSpaces && typeof storedSpaces === 'object') {
+        applyStoredSpaceAdjustments(storedSpaces);
+      }
+      if (
+        selectedSpace &&
+        colorSpaceAdjustmentDefinitions[selectedSpace] &&
+        spaceSelect &&
+        spaceSelect.value !== selectedSpace
+      ) {
+        spaceSelect.value = selectedSpace;
+      }
+    }
+
+    function persistAdjustmentState(options = {}) {
+      if (typeof window === 'undefined' || !window.localStorage) {
+        return;
+      }
+      if (options.immediate) {
+        if (persistAdjustmentsHandle !== null) {
+          window.clearTimeout(persistAdjustmentsHandle);
+          persistAdjustmentsHandle = null;
+        }
+        writeAdjustmentStateToStorage();
+        return;
+      }
+      if (persistAdjustmentsHandle !== null) {
+        return;
+      }
+      persistAdjustmentsHandle = window.setTimeout(() => {
+        persistAdjustmentsHandle = null;
+        writeAdjustmentStateToStorage();
+      }, PERSIST_DEBOUNCE_MS);
+    }
+
+    function writeAdjustmentStateToStorage() {
+      if (typeof window === 'undefined' || !window.localStorage) {
+        return;
+      }
+      try {
+        window.localStorage.setItem(
+          ADJUSTMENT_STORAGE_KEY,
+          JSON.stringify({
+            imageAdjustments: {
+              brightness: clamp(imageAdjustments.brightness ?? 0, -100, 100),
+              contrast: clamp(imageAdjustments.contrast ?? 0, -100, 100),
+              saturation: clamp(imageAdjustments.saturation ?? 100, 0, 200)
+            },
+            spaceAdjustments: serializeSpaceAdjustmentState(),
+            selectedSpace: spaceSelect?.value ?? 'rgb'
+          })
+        );
+      } catch (error) {
+        console.warn('Unable to persist adjustments', error);
+      }
+    }
+
+    function serializeSpaceAdjustmentState() {
+      const serialized = {};
+      Object.entries(spaceAdjustmentState).forEach(([mode, axes]) => {
+        if (!axes) return;
+        const descriptor = colorSpaceAdjustmentDefinitions[mode];
+        if (!descriptor) return;
+        const storedAxes = {};
+        descriptor.axes.forEach((axis) => {
+          const value = axes[axis.id];
+          if (Number.isFinite(value)) {
+            storedAxes[axis.id] = clampAxisValue(value, axis);
+          }
+        });
+        if (Object.keys(storedAxes).length > 0) {
+          serialized[mode] = storedAxes;
+        }
+      });
+      return serialized;
+    }
+
+    function applyStoredSpaceAdjustments(savedSpaces) {
+      Object.entries(savedSpaces).forEach(([mode, axes]) => {
+        if (!axes || typeof axes !== 'object') return;
+        const descriptor = colorSpaceAdjustmentDefinitions[mode];
+        if (!descriptor) return;
+        const state = ensureSpaceAdjustmentState(mode);
+        descriptor.axes.forEach((axis) => {
+          const rawValue = Number(axes[axis.id]);
+          if (Number.isFinite(rawValue)) {
+            state[axis.id] = clampAxisValue(rawValue, axis);
+          }
+        });
+      });
+    }
+
+    function restoreImageFromStorage() {
+      if (typeof window === 'undefined' || !window.localStorage) {
+        return;
+      }
+      let dataUrl = null;
+      try {
+        dataUrl = window.localStorage.getItem(IMAGE_STORAGE_KEY);
+      } catch (error) {
+        console.warn('Unable to read stored image', error);
+        return;
+      }
+      if (!dataUrl || typeof dataUrl !== 'string') {
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        loadedImage = img;
+        redrawImage();
+        resampleImage();
+        setColorUiVisible(true);
+      };
+      img.src = dataUrl;
+    }
+
     function handleAdjustmentChange(type) {
       if (type === 'brightness' && brightnessSlider) {
         const value = parseInt(brightnessSlider.value, 10);
@@ -2403,6 +2584,7 @@
         redrawImage();
         resampleImage();
       }
+      persistAdjustmentState();
     }
 
     function resetAdjustments() {
@@ -2415,6 +2597,7 @@
         redrawImage();
         resampleImage();
       }
+      persistAdjustmentState({ immediate: true });
     }
 
     function syncAdjustmentLabels() {
@@ -2457,6 +2640,7 @@
           spaceAdjustmentsBlock.classList.add('hidden');
         }
         spaceAdjustmentsContainer.innerHTML = '';
+        syncSpaceModificationSummary();
         return;
       }
       spaceAdjustmentsBlock?.classList.remove('hidden');
@@ -2497,6 +2681,7 @@
         spaceAdjustmentsContainer.appendChild(control);
         spaceAxisElements.set(axisKey(mode, axis.id), { axis, slider, output });
       });
+      syncSpaceModificationSummary();
     }
 
     function handleSpaceAxisInput(event) {
@@ -2517,6 +2702,7 @@
         entry.output.textContent = formatAxisValue(axis, value);
       }
       handleSpaceAdjustmentChange();
+      persistAdjustmentState();
     }
 
     function handleSpaceAdjustmentChange() {
@@ -2526,13 +2712,130 @@
       } else {
         requestRender();
       }
+      syncSpaceModificationSummary();
     }
 
     function resetSpaceAdjustmentsForCurrentMode() {
       if (!spaceSelect) return;
       const mode = spaceSelect.value;
+      const changed = setSpaceAdjustmentsToDefault(mode);
+      renderSpaceAdjustmentControls();
+      if (changed) {
+        handleSpaceAdjustmentChange();
+        persistAdjustmentState({ immediate: true });
+      } else {
+        syncSpaceModificationSummary();
+      }
+    }
+
+    function clearAllSpaceAdjustments() {
+      const modes = new Set(Object.keys(spaceAdjustmentState));
+      if (spaceSelect?.value) {
+        modes.add(spaceSelect.value);
+      }
+      let changed = false;
+      modes.forEach((mode) => {
+        if (setSpaceAdjustmentsToDefault(mode)) {
+          changed = true;
+        }
+      });
+      renderSpaceAdjustmentControls();
+      if (changed) {
+        handleSpaceAdjustmentChange();
+        persistAdjustmentState({ immediate: true });
+      } else {
+        syncSpaceModificationSummary();
+      }
+    }
+
+    function handleSpaceModificationListClick(event) {
+      const trigger = event.target.closest('[data-space-mod-remove]');
+      if (!trigger) return;
+      const mode = trigger.getAttribute('data-space-mod-remove');
+      if (!mode) return;
+      event.preventDefault();
+      const changed = setSpaceAdjustmentsToDefault(mode);
+      if (spaceSelect?.value === mode) {
+        renderSpaceAdjustmentControls();
+      }
+      if (changed) {
+        handleSpaceAdjustmentChange();
+        persistAdjustmentState({ immediate: true });
+      } else {
+        syncSpaceModificationSummary();
+      }
+    }
+
+    function syncSpaceModificationSummary() {
+      if (!spaceModificationsList) return;
+      const entries = collectActiveSpaceAdjustmentEntries();
+      if (!entries.length) {
+        spaceModificationsList.innerHTML =
+          '<li class="space-mod-empty">No color space modifications yet.</li>';
+        if (clearSpaceAdjustmentsButton) {
+          clearSpaceAdjustmentsButton.disabled = true;
+          clearSpaceAdjustmentsButton.setAttribute('aria-disabled', 'true');
+        }
+        return;
+      }
+      const summaryHtml = entries
+        .map(({ mode, descriptor, deltas }) => {
+          if (!descriptor) return '';
+          const axisRows = descriptor.axes
+            .map((axis) => {
+              const axisDelta = deltas?.[axis.id] ?? 0;
+              const epsilon = axis.epsilon ?? 1e-4;
+              if (Math.abs(axisDelta) <= epsilon) {
+                return null;
+              }
+              const state = ensureSpaceAdjustmentState(mode);
+              const value = clampAxisValue(state[axis.id] ?? axis.defaultValue ?? 0, axis);
+              return `<span>${axis.label}: <span class="space-mod-value">${formatAxisValue(
+                axis,
+                value
+              )}</span></span>`;
+            })
+            .filter(Boolean);
+          if (!axisRows.length) {
+            return '';
+          }
+          return `
+            <li class="space-mod-item">
+              <button
+                type="button"
+                class="space-mod-remove"
+                data-space-mod-remove="${mode}"
+                aria-label="Remove ${descriptor.title} adjustments"
+              >&times;</button>
+              <div class="space-mod-name">${descriptor.title}</div>
+              <div class="space-mod-values">
+                ${axisRows.join('')}
+              </div>
+            </li>
+          `;
+        })
+        .filter(Boolean)
+        .join('');
+      if (!summaryHtml) {
+        spaceModificationsList.innerHTML =
+          '<li class="space-mod-empty">No color space modifications yet.</li>';
+        if (clearSpaceAdjustmentsButton) {
+          clearSpaceAdjustmentsButton.disabled = true;
+          clearSpaceAdjustmentsButton.setAttribute('aria-disabled', 'true');
+        }
+        return;
+      }
+      spaceModificationsList.innerHTML = summaryHtml;
+      if (clearSpaceAdjustmentsButton) {
+        clearSpaceAdjustmentsButton.disabled = false;
+        clearSpaceAdjustmentsButton.removeAttribute('aria-disabled');
+      }
+    }
+
+    function setSpaceAdjustmentsToDefault(mode) {
+      if (!mode) return false;
       const descriptor = colorSpaceAdjustmentDefinitions[mode];
-      if (!descriptor) return;
+      if (!descriptor) return false;
       const state = ensureSpaceAdjustmentState(mode);
       let changed = false;
       descriptor.axes.forEach((axis) => {
@@ -2542,10 +2845,7 @@
           changed = true;
         }
       });
-      renderSpaceAdjustmentControls();
-      if (changed) {
-        handleSpaceAdjustmentChange();
-      }
+      return changed;
     }
 
     function ensureSpaceAdjustmentState(mode) {
@@ -2694,27 +2994,6 @@
         Math.round(clamp(g * 255, 0, 255)),
         Math.round(clamp(b * 255, 0, 255))
       ];
-    }
-
-    function xyzToXyy(x, y, z) {
-      const sum = x + y + z;
-      if (sum === 0) {
-        return { x: 0, y: 0, Y: 0 };
-      }
-      return {
-        x: x / sum,
-        y: y / sum,
-        Y: y
-      };
-    }
-
-    function xyyToXyz(xChromaticity, yChromaticity, Y) {
-      if (yChromaticity <= 0) {
-        return { x: 0, y: 0, z: 0 };
-      }
-      const X = (Y / yChromaticity) * xChromaticity;
-      const Z = (Y / yChromaticity) * (1 - xChromaticity - yChromaticity);
-      return { x: X, y: Y, z: Z };
     }
 
     function rgbToLinearRgb(r, g, b) {
@@ -2987,21 +3266,6 @@
           Math.round(clamp(g, 0, 1) * 255),
           Math.round(clamp(b, 0, 1) * 255)
         ];
-      }
-      if (mode === 'xyz') {
-        const X = clamp(coords.x, 0, 1) * 0.95047;
-        const Y = clamp(coords.y, 0, 1) * 1.0;
-        const Z = clamp(coords.z, 0, 1) * 1.08883;
-        return labToRgb(...xyzToLab(X, Y, Z));
-      }
-      if (mode === 'xyy') {
-        const x = clamp(coords.x, 0, 1);
-        const y = clamp(coords.y, 0, 1);
-        const Y = clamp(coords.z, 0, 1);
-        if (y === 0) return [0, 0, 0];
-        const X = (Y / y) * x;
-        const Z = (Y / y) * (1 - x - y);
-        return labToRgb(...xyzToLab(X, Y, Z));
       }
       if (mode === 'oklab') {
         const L = clamp(coords.z, 0, 1);
